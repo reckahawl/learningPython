@@ -1,0 +1,3649 @@
+Coroutines
+Coroutines declared with the async/await syntax is the preferred way of writing asyncio applications. For example, the following snippet of code prints “hello”, waits 1 second, and then prints “world”:
+
+>>>
+>>> import asyncio
+
+>>> async def main():
+...     print('hello')
+...     await asyncio.sleep(1)
+...     print('world')
+
+>>> asyncio.run(main())
+hello
+world
+Note that simply calling a coroutine will not schedule it to be executed:
+
+>>>
+>>> main()
+<coroutine object main at 0x1053bb7c8>
+To actually run a coroutine, asyncio provides three main mechanisms:
+
+The asyncio.run() function to run the top-level entry point “main()” function (see the above example.)
+
+Awaiting on a coroutine. The following snippet of code will print “hello” after waiting for 1 second, and then print “world” after waiting for another 2 seconds:
+
+import asyncio
+import time
+
+async def say_after(delay, what):
+    await asyncio.sleep(delay)
+    print(what)
+
+async def main():
+    print(f"started at {time.strftime('%X')}")
+
+    await say_after(1, 'hello')
+    await say_after(2, 'world')
+
+    print(f"finished at {time.strftime('%X')}")
+
+asyncio.run(main())
+Expected output:
+
+started at 17:13:52
+hello
+world
+finished at 17:13:55
+The asyncio.create_task() function to run coroutines concurrently as asyncio Tasks.
+
+Let’s modify the above example and run two say_after coroutines concurrently:
+
+async def main():
+    task1 = asyncio.create_task(
+        say_after(1, 'hello'))
+
+    task2 = asyncio.create_task(
+        say_after(2, 'world'))
+
+    print(f"started at {time.strftime('%X')}")
+
+    # Wait until both tasks are completed (should take
+    # around 2 seconds.)
+    await task1
+    await task2
+
+    print(f"finished at {time.strftime('%X')}")
+Note that expected output now shows that the snippet runs 1 second faster than before:
+
+started at 17:14:32
+hello
+world
+finished at 17:14:34
+Awaitables
+We say that an object is an awaitable object if it can be used in an await expression. Many asyncio APIs are designed to accept awaitables.
+
+There are three main types of awaitable objects: coroutines, Tasks, and Futures.
+
+Coroutines
+
+Python coroutines are awaitables and therefore can be awaited from other coroutines:
+
+import asyncio
+
+async def nested():
+    return 42
+
+async def main():
+    # Nothing happens if we just call "nested()".
+    # A coroutine object is created but not awaited,
+    # so it *won't run at all*.
+    nested()
+
+    # Let's do it differently now and await it:
+    print(await nested())  # will print "42".
+
+asyncio.run(main())
+Important In this documentation the term “coroutine” can be used for two closely related concepts:
+a coroutine function: an async def function;
+
+a coroutine object: an object returned by calling a coroutine function.
+
+asyncio also supports legacy generator-based coroutines.
+
+Tasks
+
+Tasks are used to schedule coroutines concurrently.
+
+When a coroutine is wrapped into a Task with functions like asyncio.create_task() the coroutine is automatically scheduled to run soon:
+
+import asyncio
+
+async def nested():
+    return 42
+
+async def main():
+    # Schedule nested() to run soon concurrently
+    # with "main()".
+    task = asyncio.create_task(nested())
+
+    # "task" can now be used to cancel "nested()", or
+    # can simply be awaited to wait until it is complete:
+    await task
+
+asyncio.run(main())
+Futures
+
+A Future is a special low-level awaitable object that represents an eventual result of an asynchronous operation.
+
+When a Future object is awaited it means that the coroutine will wait until the Future is resolved in some other place.
+
+Future objects in asyncio are needed to allow callback-based code to be used with async/await.
+
+Normally there is no need to create Future objects at the application level code.
+
+Future objects, sometimes exposed by libraries and some asyncio APIs, can be awaited:
+
+async def main():
+    await function_that_returns_a_future_object()
+
+    # this is also valid:
+    await asyncio.gather(
+        function_that_returns_a_future_object(),
+        some_python_coroutine()
+    )
+A good example of a low-level function that returns a Future object is loop.run_in_executor().
+
+Running an asyncio Program
+asyncio.run(coro, *, debug=False)
+Execute the coroutine coro and return the result.
+
+This function runs the passed coroutine, taking care of managing the asyncio event loop, finalizing asynchronous generators, and closing the threadpool.
+
+This function cannot be called when another asyncio event loop is running in the same thread.
+
+If debug is True, the event loop will be run in debug mode.
+
+This function always creates a new event loop and closes it at the end. It should be used as a main entry point for asyncio programs, and should ideally only be called once.
+
+Example:
+
+async def main():
+    await asyncio.sleep(1)
+    print('hello')
+
+asyncio.run(main())
+New in version 3.7.
+
+Changed in version 3.9: Updated to use loop.shutdown_default_executor().
+
+Note The source code for asyncio.run() can be found in Lib/asyncio/runners.py.
+Creating Tasks
+asyncio.create_task(coro, *, name=None)
+Wrap the coro coroutine into a Task and schedule its execution. Return the Task object.
+
+If name is not None, it is set as the name of the task using Task.set_name().
+
+The task is executed in the loop returned by get_running_loop(), RuntimeError is raised if there is no running loop in current thread.
+
+Important Save a reference to the result of this function, to avoid a task disappearing mid-execution. The event loop only keeps weak references to tasks. A task that isn’t referenced elsewhere may get garbage collected at any time, even before it’s done. For reliable “fire-and-forget” background tasks, gather them in a collection:
+background_tasks = set()
+
+for i in range(10):
+    task = asyncio.create_task(some_coro(param=i))
+
+    # Add task to the set. This creates a strong reference.
+    background_tasks.add(task)
+
+    # To prevent keeping references to finished tasks forever,
+    # make each task remove its own reference from the set after
+    # completion:
+    task.add_done_callback(background_tasks.discard)
+New in version 3.7.
+
+Changed in version 3.8: Added the name parameter.
+
+Sleeping
+coroutine asyncio.sleep(delay, result=None)
+Block for delay seconds.
+
+If result is provided, it is returned to the caller when the coroutine completes.
+
+sleep() always suspends the current task, allowing other tasks to run.
+
+Setting the delay to 0 provides an optimized path to allow other tasks to run. This can be used by long-running functions to avoid blocking the event loop for the full duration of the function call.
+
+Deprecated since version 3.8, removed in version 3.10: The loop parameter. This function has been implicitly getting the current running loop since 3.7. See What’s New in 3.10’s Removed section for more information.
+
+Example of coroutine displaying the current date every second for 5 seconds:
+
+import asyncio
+import datetime
+
+async def display_date():
+    loop = asyncio.get_running_loop()
+    end_time = loop.time() + 5.0
+    while True:
+        print(datetime.datetime.now())
+        if (loop.time() + 1.0) >= end_time:
+            break
+        await asyncio.sleep(1)
+
+asyncio.run(display_date())
+Changed in version 3.10: Removed the loop parameter.
+
+Running Tasks Concurrently
+awaitable asyncio.gather(*aws, return_exceptions=False)
+Run awaitable objects in the aws sequence concurrently.
+
+If any awaitable in aws is a coroutine, it is automatically scheduled as a Task.
+
+If all awaitables are completed successfully, the result is an aggregate list of returned values. The order of result values corresponds to the order of awaitables in aws.
+
+If return_exceptions is False (default), the first raised exception is immediately propagated to the task that awaits on gather(). Other awaitables in the aws sequence won’t be cancelled and will continue to run.
+
+If return_exceptions is True, exceptions are treated the same as successful results, and aggregated in the result list.
+
+If gather() is cancelled, all submitted awaitables (that have not completed yet) are also cancelled.
+
+If any Task or Future from the aws sequence is cancelled, it is treated as if it raised CancelledError – the gather() call is not cancelled in this case. This is to prevent the cancellation of one submitted Task/Future to cause other Tasks/Futures to be cancelled.
+
+Changed in version 3.10: Removed the loop parameter.
+
+Example:
+
+import asyncio
+
+async def factorial(name, number):
+    f = 1
+    for i in range(2, number + 1):
+        print(f"Task {name}: Compute factorial({number}), currently i={i}...")
+        await asyncio.sleep(1)
+        f *= i
+    print(f"Task {name}: factorial({number}) = {f}")
+    return f
+
+async def main():
+    # Schedule three calls *concurrently*:
+    L = await asyncio.gather(
+        factorial("A", 2),
+        factorial("B", 3),
+        factorial("C", 4),
+    )
+    print(L)
+
+asyncio.run(main())
+
+# Expected output:
+#
+#     Task A: Compute factorial(2), currently i=2...
+#     Task B: Compute factorial(3), currently i=2...
+#     Task C: Compute factorial(4), currently i=2...
+#     Task A: factorial(2) = 2
+#     Task B: Compute factorial(3), currently i=3...
+#     Task C: Compute factorial(4), currently i=3...
+#     Task B: factorial(3) = 6
+#     Task C: Compute factorial(4), currently i=4...
+#     Task C: factorial(4) = 24
+#     [2, 6, 24]
+Note If return_exceptions is False, cancelling gather() after it has been marked done won’t cancel any submitted awaitables. For instance, gather can be marked done after propagating an exception to the caller, therefore, calling gather.cancel() after catching an exception (raised by one of the awaitables) from gather won’t cancel any other awaitables.
+Changed in version 3.7: If the gather itself is cancelled, the cancellation is propagated regardless of return_exceptions.
+
+Changed in version 3.10: Removed the loop parameter.
+
+Deprecated since version 3.10: Deprecation warning is emitted if no positional arguments are provided or not all positional arguments are Future-like objects and there is no running event loop.
+
+Shielding From Cancellation
+awaitable asyncio.shield(aw)
+Protect an awaitable object from being cancelled.
+
+If aw is a coroutine it is automatically scheduled as a Task.
+
+The statement:
+
+task = asyncio.create_task(something())
+res = await shield(task)
+is equivalent to:
+
+res = await something()
+except that if the coroutine containing it is cancelled, the Task running in something() is not cancelled. From the point of view of something(), the cancellation did not happen. Although its caller is still cancelled, so the “await” expression still raises a CancelledError.
+
+If something() is cancelled by other means (i.e. from within itself) that would also cancel shield().
+
+If it is desired to completely ignore cancellation (not recommended) the shield() function should be combined with a try/except clause, as follows:
+
+task = asyncio.create_task(something())
+try:
+    res = await shield(task)
+except CancelledError:
+    res = None
+Important Save a reference to tasks passed to this function, to avoid a task disappearing mid-execution. The event loop only keeps weak references to tasks. A task that isn’t referenced elsewhere may get garbage collected at any time, even before it’s done.
+Changed in version 3.10: Removed the loop parameter.
+
+Deprecated since version 3.10: Deprecation warning is emitted if aw is not Future-like object and there is no running event loop.
+
+Timeouts
+coroutine asyncio.wait_for(aw, timeout)
+Wait for the aw awaitable to complete with a timeout.
+
+If aw is a coroutine it is automatically scheduled as a Task.
+
+timeout can either be None or a float or int number of seconds to wait for. If timeout is None, block until the future completes.
+
+If a timeout occurs, it cancels the task and raises asyncio.TimeoutError.
+
+To avoid the task cancellation, wrap it in shield().
+
+The function will wait until the future is actually cancelled, so the total wait time may exceed the timeout. If an exception happens during cancellation, it is propagated.
+
+If the wait is cancelled, the future aw is also cancelled.
+
+Changed in version 3.10: Removed the loop parameter.
+
+Example:
+
+async def eternity():
+    # Sleep for one hour
+    await asyncio.sleep(3600)
+    print('yay!')
+
+async def main():
+    # Wait for at most 1 second
+    try:
+        await asyncio.wait_for(eternity(), timeout=1.0)
+    except asyncio.TimeoutError:
+        print('timeout!')
+
+asyncio.run(main())
+
+# Expected output:
+#
+#     timeout!
+Changed in version 3.7: When aw is cancelled due to a timeout, wait_for waits for aw to be cancelled. Previously, it raised asyncio.TimeoutError immediately.
+
+Changed in version 3.10: Removed the loop parameter.
+
+Waiting Primitives
+coroutine asyncio.wait(aws, *, timeout=None, return_when=ALL_COMPLETED)
+Run awaitable objects in the aws iterable concurrently and block until the condition specified by return_when.
+
+The aws iterable must not be empty.
+
+Returns two sets of Tasks/Futures: (done, pending).
+
+Usage:
+
+done, pending = await asyncio.wait(aws)
+timeout (a float or int), if specified, can be used to control the maximum number of seconds to wait before returning.
+
+Note that this function does not raise asyncio.TimeoutError. Futures or Tasks that aren’t done when the timeout occurs are simply returned in the second set.
+
+return_when indicates when this function should return. It must be one of the following constants:
+
+Constant
+
+Description
+
+FIRST_COMPLETED
+
+The function will return when any future finishes or is cancelled.
+
+FIRST_EXCEPTION
+
+The function will return when any future finishes by raising an exception. If no future raises an exception then it is equivalent to ALL_COMPLETED.
+
+ALL_COMPLETED
+
+The function will return when all futures finish or are cancelled.
+
+Unlike wait_for(), wait() does not cancel the futures when a timeout occurs.
+
+Deprecated since version 3.8: If any awaitable in aws is a coroutine, it is automatically scheduled as a Task. Passing coroutines objects to wait() directly is deprecated as it leads to confusing behavior.
+
+Changed in version 3.10: Removed the loop parameter.
+
+Note wait() schedules coroutines as Tasks automatically and later returns those implicitly created Task objects in (done, pending) sets. Therefore the following code won’t work as expected:
+async def foo():
+    return 42
+
+coro = foo()
+done, pending = await asyncio.wait({coro})
+
+if coro in done:
+    # This branch will never be run!
+Here is how the above snippet can be fixed:
+
+async def foo():
+    return 42
+
+task = asyncio.create_task(foo())
+done, pending = await asyncio.wait({task})
+
+if task in done:
+    # Everything will work as expected now.
+Deprecated since version 3.8, will be removed in version 3.11: Passing coroutine objects to wait() directly is deprecated.
+
+Changed in version 3.10: Removed the loop parameter.
+
+asyncio.as_completed(aws, *, timeout=None)
+Run awaitable objects in the aws iterable concurrently. Return an iterator of coroutines. Each coroutine returned can be awaited to get the earliest next result from the iterable of the remaining awaitables.
+
+Raises asyncio.TimeoutError if the timeout occurs before all Futures are done.
+
+Changed in version 3.10: Removed the loop parameter.
+
+Example:
+
+for coro in as_completed(aws):
+    earliest_result = await coro
+    # ...
+Changed in version 3.10: Removed the loop parameter.
+
+Deprecated since version 3.10: Deprecation warning is emitted if not all awaitable objects in the aws iterable are Future-like objects and there is no running event loop.
+
+Running in Threads
+coroutine asyncio.to_thread(func, /, *args, **kwargs)
+Asynchronously run function func in a separate thread.
+
+Any *args and **kwargs supplied for this function are directly passed to func. Also, the current contextvars.Context is propagated, allowing context variables from the event loop thread to be accessed in the separate thread.
+
+Return a coroutine that can be awaited to get the eventual result of func.
+
+This coroutine function is primarily intended to be used for executing IO-bound functions/methods that would otherwise block the event loop if they were ran in the main thread. For example:
+
+def blocking_io():
+    print(f"start blocking_io at {time.strftime('%X')}")
+    # Note that time.sleep() can be replaced with any blocking
+    # IO-bound operation, such as file operations.
+    time.sleep(1)
+    print(f"blocking_io complete at {time.strftime('%X')}")
+
+async def main():
+    print(f"started main at {time.strftime('%X')}")
+
+    await asyncio.gather(
+        asyncio.to_thread(blocking_io),
+        asyncio.sleep(1))
+
+    print(f"finished main at {time.strftime('%X')}")
+
+
+asyncio.run(main())
+
+# Expected output:
+#
+# started main at 19:50:53
+# start blocking_io at 19:50:53
+# blocking_io complete at 19:50:54
+# finished main at 19:50:54
+Directly calling blocking_io() in any coroutine would block the event loop for its duration, resulting in an additional 1 second of run time. Instead, by using asyncio.to_thread(), we can run it in a separate thread without blocking the event loop.
+
+Note Due to the GIL, asyncio.to_thread() can typically only be used to make IO-bound functions non-blocking. However, for extension modules that release the GIL or alternative Python implementations that don’t have one, asyncio.to_thread() can also be used for CPU-bound functions.
+New in version 3.9.
+
+Scheduling From Other Threads
+asyncio.run_coroutine_threadsafe(coro, loop)
+Submit a coroutine to the given event loop. Thread-safe.
+
+Return a concurrent.futures.Future to wait for the result from another OS thread.
+
+This function is meant to be called from a different OS thread than the one where the event loop is running. Example:
+
+# Create a coroutine
+coro = asyncio.sleep(1, result=3)
+
+# Submit the coroutine to a given loop
+future = asyncio.run_coroutine_threadsafe(coro, loop)
+
+# Wait for the result with an optional timeout argument
+assert future.result(timeout) == 3
+If an exception is raised in the coroutine, the returned Future will be notified. It can also be used to cancel the task in the event loop:
+
+try:
+    result = future.result(timeout)
+except concurrent.futures.TimeoutError:
+    print('The coroutine took too long, cancelling the task...')
+    future.cancel()
+except Exception as exc:
+    print(f'The coroutine raised an exception: {exc!r}')
+else:
+    print(f'The coroutine returned: {result!r}')
+See the concurrency and multithreading section of the documentation.
+
+Unlike other asyncio functions this function requires the loop argument to be passed explicitly.
+
+New in version 3.5.1.
+
+Introspection
+asyncio.current_task(loop=None)
+Return the currently running Task instance, or None if no task is running.
+
+If loop is None get_running_loop() is used to get the current loop.
+
+New in version 3.7.
+
+asyncio.all_tasks(loop=None)
+Return a set of not yet finished Task objects run by the loop.
+
+If loop is None, get_running_loop() is used for getting current loop.
+
+New in version 3.7.
+
+Task Object
+class asyncio.Task(coro, *, loop=None, name=None)
+A Future-like object that runs a Python coroutine. Not thread-safe.
+
+Tasks are used to run coroutines in event loops. If a coroutine awaits on a Future, the Task suspends the execution of the coroutine and waits for the completion of the Future. When the Future is done, the execution of the wrapped coroutine resumes.
+
+Event loops use cooperative scheduling: an event loop runs one Task at a time. While a Task awaits for the completion of a Future, the event loop runs other Tasks, callbacks, or performs IO operations.
+
+Use the high-level asyncio.create_task() function to create Tasks, or the low-level loop.create_task() or ensure_future() functions. Manual instantiation of Tasks is discouraged.
+
+To cancel a running Task use the cancel() method. Calling it will cause the Task to throw a CancelledError exception into the wrapped coroutine. If a coroutine is awaiting on a Future object during cancellation, the Future object will be cancelled.
+
+cancelled() can be used to check if the Task was cancelled. The method returns True if the wrapped coroutine did not suppress the CancelledError exception and was actually cancelled.
+
+asyncio.Task inherits from Future all of its APIs except Future.set_result() and Future.set_exception().
+
+Tasks support the contextvars module. When a Task is created it copies the current context and later runs its coroutine in the copied context.
+
+Changed in version 3.7: Added support for the contextvars module.
+
+Changed in version 3.8: Added the name parameter.
+
+Deprecated since version 3.10: Deprecation warning is emitted if loop is not specified and there is no running event loop.
+
+cancel(msg=None)
+Request the Task to be cancelled.
+
+This arranges for a CancelledError exception to be thrown into the wrapped coroutine on the next cycle of the event loop.
+
+The coroutine then has a chance to clean up or even deny the request by suppressing the exception with a try … … except CancelledError … finally block. Therefore, unlike Future.cancel(), Task.cancel() does not guarantee that the Task will be cancelled, although suppressing cancellation completely is not common and is actively discouraged.
+
+Changed in version 3.9: Added the msg parameter.
+
+The following example illustrates how coroutines can intercept the cancellation request:
+
+async def cancel_me():
+    print('cancel_me(): before sleep')
+
+    try:
+        # Wait for 1 hour
+        await asyncio.sleep(3600)
+    except asyncio.CancelledError:
+        print('cancel_me(): cancel sleep')
+        raise
+    finally:
+        print('cancel_me(): after sleep')
+
+async def main():
+    # Create a "cancel_me" Task
+    task = asyncio.create_task(cancel_me())
+
+    # Wait for 1 second
+    await asyncio.sleep(1)
+
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        print("main(): cancel_me is cancelled now")
+
+asyncio.run(main())
+
+# Expected output:
+#
+#     cancel_me(): before sleep
+#     cancel_me(): cancel sleep
+#     cancel_me(): after sleep
+#     main(): cancel_me is cancelled now
+cancelled()
+Return True if the Task is cancelled.
+
+The Task is cancelled when the cancellation was requested with cancel() and the wrapped coroutine propagated the CancelledError exception thrown into it.
+
+done()
+Return True if the Task is done.
+
+A Task is done when the wrapped coroutine either returned a value, raised an exception, or the Task was cancelled.
+
+result()
+Return the result of the Task.
+
+If the Task is done, the result of the wrapped coroutine is returned (or if the coroutine raised an exception, that exception is re-raised.)
+
+If the Task has been cancelled, this method raises a CancelledError exception.
+
+If the Task’s result isn’t yet available, this method raises a InvalidStateError exception.
+
+exception()
+Return the exception of the Task.
+
+If the wrapped coroutine raised an exception that exception is returned. If the wrapped coroutine returned normally this method returns None.
+
+If the Task has been cancelled, this method raises a CancelledError exception.
+
+If the Task isn’t done yet, this method raises an InvalidStateError exception.
+
+add_done_callback(callback, *, context=None)
+Add a callback to be run when the Task is done.
+
+This method should only be used in low-level callback-based code.
+
+See the documentation of Future.add_done_callback() for more details.
+
+remove_done_callback(callback)
+Remove callback from the callbacks list.
+
+This method should only be used in low-level callback-based code.
+
+See the documentation of Future.remove_done_callback() for more details.
+
+get_stack(*, limit=None)
+Return the list of stack frames for this Task.
+
+If the wrapped coroutine is not done, this returns the stack where it is suspended. If the coroutine has completed successfully or was cancelled, this returns an empty list. If the coroutine was terminated by an exception, this returns the list of traceback frames.
+
+The frames are always ordered from oldest to newest.
+
+Only one stack frame is returned for a suspended coroutine.
+
+The optional limit argument sets the maximum number of frames to return; by default all available frames are returned. The ordering of the returned list differs depending on whether a stack or a traceback is returned: the newest frames of a stack are returned, but the oldest frames of a traceback are returned. (This matches the behavior of the traceback module.)
+
+print_stack(*, limit=None, file=None)
+Print the stack or traceback for this Task.
+
+This produces output similar to that of the traceback module for the frames retrieved by get_stack().
+
+The limit argument is passed to get_stack() directly.
+
+The file argument is an I/O stream to which the output is written; by default output is written to sys.stderr.
+
+get_coro()
+Return the coroutine object wrapped by the Task.
+
+New in version 3.8.
+
+get_name()
+Return the name of the Task.
+
+If no name has been explicitly assigned to the Task, the default asyncio Task implementation generates a default name during instantiation.
+
+New in version 3.8.
+
+set_name(value)
+Set the name of the Task.
+
+The value argument can be any object, which is then converted to a string.
+
+In the default Task implementation, the name will be visible in the repr() output of a task object.
+
+New in version 3.8.
+
+Generator-based Coroutines
+Note Support for generator-based coroutines is deprecated and is removed in Python 3.11.
+Generator-based coroutines predate async/await syntax. They are Python generators that use yield from expressions to await on Futures and other coroutines.
+
+Generator-based coroutines should be decorated with @asyncio.coroutine, although this is not enforced.
+
+@asyncio.coroutine
+Decorator to mark generator-based coroutines.
+
+This decorator enables legacy generator-based coroutines to be compatible with async/await code:
+
+@asyncio.coroutine
+def old_style_coroutine():
+    yield from asyncio.sleep(1)
+
+async def main():
+    await old_style_coroutine()
+This decorator should not be used for async def coroutines.
+
+Deprecated since version 3.8, will be removed in version 3.11: Use async def instead.
+
+asyncio.iscoroutine(obj)
+Return True if obj is a coroutine object.
+
+This method is different from inspect.iscoroutine() because it returns True for generator-based coroutines.
+
+asyncio.iscoroutinefunction(func)
+Return True if func is a coroutine function.
+
+This method is different from inspect.iscoroutinefunction() because it returns True for generator-based coroutine functions decorated with @coroutine.Streams
+Source code: Lib/asyncio/streams.py
+
+Streams are high-level async/await-ready primitives to work with network connections. Streams allow sending and receiving data without using callbacks or low-level protocols and transports.
+
+Here is an example of a TCP echo client written using asyncio streams:
+
+import asyncio
+
+async def tcp_echo_client(message):
+    reader, writer = await asyncio.open_connection(
+        '127.0.0.1', 8888)
+
+    print(f'Send: {message!r}')
+    writer.write(message.encode())
+    await writer.drain()
+
+    data = await reader.read(100)
+    print(f'Received: {data.decode()!r}')
+
+    print('Close the connection')
+    writer.close()
+    await writer.wait_closed()
+
+asyncio.run(tcp_echo_client('Hello World!'))
+See also the Examples section below.
+
+Stream Functions
+
+The following top-level asyncio functions can be used to create and work with streams:
+
+coroutine asyncio.open_connection(host=None, port=None, *, limit=None, ssl=None, family=0, proto=0, flags=0, sock=None, local_addr=None, server_hostname=None, ssl_handshake_timeout=None, happy_eyeballs_delay=None, interleave=None)
+Establish a network connection and return a pair of (reader, writer) objects.
+
+The returned reader and writer objects are instances of StreamReader and StreamWriter classes.
+
+limit determines the buffer size limit used by the returned StreamReader instance. By default the limit is set to 64 KiB.
+
+The rest of the arguments are passed directly to loop.create_connection().
+
+Note The sock argument transfers ownership of the socket to the StreamWriter created. To close the socket, call its close() method.
+Changed in version 3.7: Added the ssl_handshake_timeout parameter.
+
+New in version 3.8: Added happy_eyeballs_delay and interleave parameters.
+
+Changed in version 3.10: Removed the loop parameter.
+
+coroutine asyncio.start_server(client_connected_cb, host=None, port=None, *, limit=None, family=socket.AF_UNSPEC, flags=socket.AI_PASSIVE, sock=None, backlog=100, ssl=None, reuse_address=None, reuse_port=None, ssl_handshake_timeout=None, start_serving=True)
+Start a socket server.
+
+The client_connected_cb callback is called whenever a new client connection is established. It receives a (reader, writer) pair as two arguments, instances of the StreamReader and StreamWriter classes.
+
+client_connected_cb can be a plain callable or a coroutine function; if it is a coroutine function, it will be automatically scheduled as a Task.
+
+limit determines the buffer size limit used by the returned StreamReader instance. By default the limit is set to 64 KiB.
+
+The rest of the arguments are passed directly to loop.create_server().
+
+Note The sock argument transfers ownership of the socket to the server created. To close the socket, call the server’s close() method.
+Changed in version 3.7: Added the ssl_handshake_timeout and start_serving parameters.
+
+Changed in version 3.10: Removed the loop parameter.
+
+Unix Sockets
+
+coroutine asyncio.open_unix_connection(path=None, *, limit=None, ssl=None, sock=None, server_hostname=None, ssl_handshake_timeout=None)
+Establish a Unix socket connection and return a pair of (reader, writer).
+
+Similar to open_connection() but operates on Unix sockets.
+
+See also the documentation of loop.create_unix_connection().
+
+Note The sock argument transfers ownership of the socket to the StreamWriter created. To close the socket, call its close() method.
+Availability: Unix.
+
+Changed in version 3.7: Added the ssl_handshake_timeout parameter. The path parameter can now be a path-like object
+
+Changed in version 3.10: Removed the loop parameter.
+
+coroutine asyncio.start_unix_server(client_connected_cb, path=None, *, limit=None, sock=None, backlog=100, ssl=None, ssl_handshake_timeout=None, start_serving=True)
+Start a Unix socket server.
+
+Similar to start_server() but works with Unix sockets.
+
+See also the documentation of loop.create_unix_server().
+
+Note The sock argument transfers ownership of the socket to the server created. To close the socket, call the server’s close() method.
+Availability: Unix.
+
+Changed in version 3.7: Added the ssl_handshake_timeout and start_serving parameters. The path parameter can now be a path-like object.
+
+Changed in version 3.10: Removed the loop parameter.
+
+StreamReader
+class asyncio.StreamReader
+Represents a reader object that provides APIs to read data from the IO stream.
+
+It is not recommended to instantiate StreamReader objects directly; use open_connection() and start_server() instead.
+
+coroutine read(n=- 1)
+Read up to n bytes. If n is not provided, or set to -1, read until EOF and return all read bytes.
+
+If EOF was received and the internal buffer is empty, return an empty bytes object.
+
+coroutine readline()
+Read one line, where “line” is a sequence of bytes ending with \n.
+
+If EOF is received and \n was not found, the method returns partially read data.
+
+If EOF is received and the internal buffer is empty, return an empty bytes object.
+
+coroutine readexactly(n)
+Read exactly n bytes.
+
+Raise an IncompleteReadError if EOF is reached before n can be read. Use the IncompleteReadError.partial attribute to get the partially read data.
+
+coroutine readuntil(separator=b'\n')
+Read data from the stream until separator is found.
+
+On success, the data and separator will be removed from the internal buffer (consumed). Returned data will include the separator at the end.
+
+If the amount of data read exceeds the configured stream limit, a LimitOverrunError exception is raised, and the data is left in the internal buffer and can be read again.
+
+If EOF is reached before the complete separator is found, an IncompleteReadError exception is raised, and the internal buffer is reset. The IncompleteReadError.partial attribute may contain a portion of the separator.
+
+New in version 3.5.2.
+
+at_eof()
+Return True if the buffer is empty and feed_eof() was called.
+
+StreamWriter
+class asyncio.StreamWriter
+Represents a writer object that provides APIs to write data to the IO stream.
+
+It is not recommended to instantiate StreamWriter objects directly; use open_connection() and start_server() instead.
+
+write(data)
+The method attempts to write the data to the underlying socket immediately. If that fails, the data is queued in an internal write buffer until it can be sent.
+
+The method should be used along with the drain() method:
+
+stream.write(data)
+await stream.drain()
+writelines(data)
+The method writes a list (or any iterable) of bytes to the underlying socket immediately. If that fails, the data is queued in an internal write buffer until it can be sent.
+
+The method should be used along with the drain() method:
+
+stream.writelines(lines)
+await stream.drain()
+close()
+The method closes the stream and the underlying socket.
+
+The method should be used along with the wait_closed() method:
+
+stream.close()
+await stream.wait_closed()
+can_write_eof()
+Return True if the underlying transport supports the write_eof() method, False otherwise.
+
+write_eof()
+Close the write end of the stream after the buffered write data is flushed.
+
+transport
+Return the underlying asyncio transport.
+
+get_extra_info(name, default=None)
+Access optional transport information; see BaseTransport.get_extra_info() for details.
+
+coroutine drain()
+Wait until it is appropriate to resume writing to the stream. Example:
+
+writer.write(data)
+await writer.drain()
+This is a flow control method that interacts with the underlying IO write buffer. When the size of the buffer reaches the high watermark, drain() blocks until the size of the buffer is drained down to the low watermark and writing can be resumed. When there is nothing to wait for, the drain() returns immediately.
+
+is_closing()
+Return True if the stream is closed or in the process of being closed.
+
+New in version 3.7.
+
+coroutine wait_closed()
+Wait until the stream is closed.
+
+Should be called after close() to wait until the underlying connection is closed.
+
+New in version 3.7.
+
+Examples
+TCP echo client using streams
+TCP echo client using the asyncio.open_connection() function:
+
+import asyncio
+
+async def tcp_echo_client(message):
+    reader, writer = await asyncio.open_connection(
+        '127.0.0.1', 8888)
+
+    print(f'Send: {message!r}')
+    writer.write(message.encode())
+
+    data = await reader.read(100)
+    print(f'Received: {data.decode()!r}')
+
+    print('Close the connection')
+    writer.close()
+
+asyncio.run(tcp_echo_client('Hello World!'))
+See also The TCP echo client protocol example uses the low-level loop.create_connection() method.
+TCP echo server using streams
+TCP echo server using the asyncio.start_server() function:
+
+import asyncio
+
+async def handle_echo(reader, writer):
+    data = await reader.read(100)
+    message = data.decode()
+    addr = writer.get_extra_info('peername')
+
+    print(f"Received {message!r} from {addr!r}")
+
+    print(f"Send: {message!r}")
+    writer.write(data)
+    await writer.drain()
+
+    print("Close the connection")
+    writer.close()
+
+async def main():
+    server = await asyncio.start_server(
+        handle_echo, '127.0.0.1', 8888)
+
+    addrs = ', '.join(str(sock.getsockname()) for sock in server.sockets)
+    print(f'Serving on {addrs}')
+
+    async with server:
+        await server.serve_forever()
+
+asyncio.run(main())
+See also The TCP echo server protocol example uses the loop.create_server() method.
+Get HTTP headers
+Simple example querying HTTP headers of the URL passed on the command line:
+
+import asyncio
+import urllib.parse
+import sys
+
+async def print_http_headers(url):
+    url = urllib.parse.urlsplit(url)
+    if url.scheme == 'https':
+        reader, writer = await asyncio.open_connection(
+            url.hostname, 443, ssl=True)
+    else:
+        reader, writer = await asyncio.open_connection(
+            url.hostname, 80)
+
+    query = (
+        f"HEAD {url.path or '/'} HTTP/1.0\r\n"
+        f"Host: {url.hostname}\r\n"
+        f"\r\n"
+    )
+
+    writer.write(query.encode('latin-1'))
+    while True:
+        line = await reader.readline()
+        if not line:
+            break
+
+        line = line.decode('latin1').rstrip()
+        if line:
+            print(f'HTTP header> {line}')
+
+    # Ignore the body, close the socket
+    writer.close()
+
+url = sys.argv[1]
+asyncio.run(print_http_headers(url))
+Usage:
+
+python example.py http://example.com/path/page.html
+or with HTTPS:
+
+python example.py https://example.com/path/page.html
+Register an open socket to wait for data using streams¶
+Coroutine waiting until a socket receives data using the open_connection() function:
+
+import asyncio
+import socket
+
+async def wait_for_data():
+    # Get a reference to the current event loop because
+    # we want to access low-level APIs.
+    Lock
+class asyncio.Lock
+Implements a mutex lock for asyncio tasks. Not thread-safe.
+
+An asyncio lock can be used to guarantee exclusive access to a shared resource.
+
+The preferred way to use a Lock is an async with statement:
+
+lock = asyncio.Lock()
+
+# ... later
+async with lock:
+    # access shared state
+which is equivalent to:
+
+lock = asyncio.Lock()
+
+# ... later
+await lock.acquire()
+try:
+    # access shared state
+finally:
+    lock.release()
+Changed in version 3.10: Removed the loop parameter.
+
+coroutine acquire()
+Acquire the lock.
+
+This method waits until the lock is unlocked, sets it to locked and returns True.
+
+When more than one coroutine is blocked in acquire() waiting for the lock to be unlocked, only one coroutine eventually proceeds.
+
+Acquiring a lock is fair: the coroutine that proceeds will be the first coroutine that started waiting on the lock.
+
+release()
+Release the lock.
+
+When the lock is locked, reset it to unlocked and return.
+
+If the lock is unlocked, a RuntimeError is raised.
+
+locked()
+Return True if the lock is locked.
+
+Event
+class asyncio.Event
+An event object. Not thread-safe.
+
+An asyncio event can be used to notify multiple asyncio tasks that some event has happened.
+
+An Event object manages an internal flag that can be set to true with the set() method and reset to false with the clear() method. The wait() method blocks until the flag is set to true. The flag is set to false initially.
+
+Changed in version 3.10: Removed the loop parameter.
+
+Example:
+
+async def waiter(event):
+    print('waiting for it ...')
+    await event.wait()
+    print('... got it!')
+
+async def main():
+    # Create an Event object.
+    event = asyncio.Event()
+
+    # Spawn a Task to wait until 'event' is set.
+    waiter_task = asyncio.create_task(waiter(event))
+
+    # Sleep for 1 second and set the event.
+    await asyncio.sleep(1)
+    event.set()
+
+    # Wait until the waiter task is finished.
+    await waiter_task
+
+asyncio.run(main())
+coroutine wait()
+Wait until the event is set.
+
+If the event is set, return True immediately. Otherwise block until another task calls set().
+
+set()
+Set the event.
+
+All tasks waiting for event to be set will be immediately awakened.
+
+clear()
+Clear (unset) the event.
+
+Tasks awaiting on wait() will now block until the set() method is called again.
+
+is_set()
+Return True if the event is set.
+
+Condition
+class asyncio.Condition(lock=None)
+A Condition object. Not thread-safe.
+
+An asyncio condition primitive can be used by a task to wait for some event to happen and then get exclusive access to a shared resource.
+
+In essence, a Condition object combines the functionality of an Event and a Lock. It is possible to have multiple Condition objects share one Lock, which allows coordinating exclusive access to a shared resource between different tasks interested in particular states of that shared resource.
+
+The optional lock argument must be a Lock object or None. In the latter case a new Lock object is created automatically.
+
+Changed in version 3.10: Removed the loop parameter.
+
+The preferred way to use a Condition is an async with statement:
+
+cond = asyncio.Condition()
+
+# ... later
+async with cond:
+    await cond.wait()
+which is equivalent to:
+
+cond = asyncio.Condition()
+
+# ... later
+await cond.acquire()
+try:
+    await cond.wait()
+finally:
+    cond.release()
+coroutine acquire()
+Acquire the underlying lock.
+
+This method waits until the underlying lock is unlocked, sets it to locked and returns True.
+
+notify(n=1)
+Wake up at most n tasks (1 by default) waiting on this condition. The method is no-op if no tasks are waiting.
+
+The lock must be acquired before this method is called and released shortly after. If called with an unlocked lock a RuntimeError error is raised.
+
+locked()
+Return True if the underlying lock is acquired.
+
+notify_all()
+Wake up all tasks waiting on this condition.
+
+This method acts like notify(), but wakes up all waiting tasks.
+
+The lock must be acquired before this method is called and released shortly after. If called with an unlocked lock a RuntimeError error is raised.
+
+release()
+Release the underlying lock.
+
+When invoked on an unlocked lock, a RuntimeError is raised.
+
+coroutine wait()
+Wait until notified.
+
+If the calling task has not acquired the lock when this method is called, a RuntimeError is raised.
+
+This method releases the underlying lock, and then blocks until it is awakened by a notify() or notify_all() call. Once awakened, the Condition re-acquires its lock and this method returns True.
+
+coroutine wait_for(predicate)
+Wait until a predicate becomes true.
+
+The predicate must be a callable which result will be interpreted as a boolean value. The final value is the return value.
+
+Semaphore
+class asyncio.Semaphore(value=1)
+A Semaphore object. Not thread-safe.
+
+A semaphore manages an internal counter which is decremented by each acquire() call and incremented by each release() call. The counter can never go below zero; when acquire() finds that it is zero, it blocks, waiting until some task calls release().
+
+The optional value argument gives the initial value for the internal counter (1 by default). If the given value is less than 0 a ValueError is raised.
+
+Changed in version 3.10: Removed the loop parameter.
+
+The preferred way to use a Semaphore is an async with statement:
+
+sem = asyncio.Semaphore(10)
+
+# ... later
+async with sem:
+    # work with shared resource
+which is equivalent to:
+
+sem = asyncio.Semaphore(10)
+
+# ... later
+await sem.acquire()
+try:
+    # work with shared resource
+finally:
+    sem.release()
+coroutine acquire()
+Acquire a semaphore.
+
+If the internal counter is greater than zero, decrement it by one and return True immediately. If it is zero, wait until a release() is called and return True.
+
+locked()
+Returns True if semaphore can not be acquired immediately.
+
+release()
+Release a semaphore, incrementing the internal counter by one. Can wake up a task waiting to acquire the semaphore.
+
+Unlike BoundedSemaphore, Semaphore allows making more release() calls than acquire() calls.
+
+BoundedSemaphore
+class asyncio.BoundedSemaphore(value=1)
+A bounded semaphore object. Not thread-safe.
+
+Bounded Semaphore is a version of Semaphore that raises a ValueError in release() if it increases the internal counter above the initial value.
+
+Changed in version 3.10: Removed the loop parameter.
+
+Changed in version 3.9: Acquiring a lock using await lock or yield from lock and/or with statement (with await lock, with (yield from lock)) was removed. Use async with lock instead.Subprocesses¶
+Source code: Lib/asyncio/subprocess.py, Lib/asyncio/base_subprocess.py
+
+This section describes high-level async/await asyncio APIs to create and manage subprocesses.
+
+Here’s an example of how asyncio can run a shell command and obtain its result:
+
+import asyncio
+
+async def run(cmd):
+    proc = await asyncio.create_subprocess_shell(
+        cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE)
+
+    stdout, stderr = await proc.communicate()
+
+    print(f'[{cmd!r} exited with {proc.returncode}]')
+    if stdout:
+        print(f'[stdout]\n{stdout.decode()}')
+    if stderr:
+        print(f'[stderr]\n{stderr.decode()}')
+
+asyncio.run(run('ls /zzz'))
+will print:
+
+['ls /zzz' exited with 1]
+[stderr]
+ls: /zzz: No such file or directory
+Because all asyncio subprocess functions are asynchronous and asyncio provides many tools to work with such functions, it is easy to execute and monitor multiple subprocesses in parallel. It is indeed trivial to modify the above example to run several commands simultaneously:
+
+async def main():
+    await asyncio.gather(
+        run('ls /zzz'),
+        run('sleep 1; echo "hello"'))
+
+asyncio.run(main())
+See also the Examples subsection.
+
+Creating Subprocesses
+coroutine asyncio.create_subprocess_exec(program, *args, stdin=None, stdout=None, stderr=None, limit=None, **kwds)
+Create a subprocess.
+
+The limit argument sets the buffer limit for StreamReader wrappers for Process.stdout and Process.stderr (if subprocess.PIPE is passed to stdout and stderr arguments).
+
+Return a Process instance.
+
+See the documentation of loop.subprocess_exec() for other parameters.
+
+Changed in version 3.10: Removed the loop parameter.
+
+coroutine asyncio.create_subprocess_shell(cmd, stdin=None, stdout=None, stderr=None, limit=None, **kwds)
+Run the cmd shell command.
+
+The limit argument sets the buffer limit for StreamReader wrappers for Process.stdout and Process.stderr (if subprocess.PIPE is passed to stdout and stderr arguments).
+
+Return a Process instance.
+
+See the documentation of loop.subprocess_shell() for other parameters.
+
+Important It is the application’s responsibility to ensure that all whitespace and special characters are quoted appropriately to avoid shell injection vulnerabilities. The shlex.quote() function can be used to properly escape whitespace and special shell characters in strings that are going to be used to construct shell commands.
+Changed in version 3.10: Removed the loop parameter.
+
+Note Subprocesses are available for Windows if a ProactorEventLoop is used. See Subprocess Support on Windows for details.
+See also asyncio also has the following low-level APIs to work with subprocesses: loop.subprocess_exec(), loop.subprocess_shell(), loop.connect_read_pipe(), loop.connect_write_pipe(), as well as the Subprocess Transports and Subprocess Protocols.
+Constants
+asyncio.subprocess.PIPE
+Can be passed to the stdin, stdout or stderr parameters.
+
+If PIPE is passed to stdin argument, the Process.stdin attribute will point to a StreamWriter instance.
+
+If PIPE is passed to stdout or stderr arguments, the Process.stdout and Process.stderr attributes will point to StreamReader instances.
+
+asyncio.subprocess.STDOUT
+Special value that can be used as the stderr argument and indicates that standard error should be redirected into standard output.
+
+asyncio.subprocess.DEVNULL
+Special value that can be used as the stdin, stdout or stderr argument to process creation functions. It indicates that the special file os.devnull will be used for the corresponding subprocess stream.
+
+Interacting with Subprocesses
+Both create_subprocess_exec() and create_subprocess_shell() functions return instances of the Process class. Process is a high-level wrapper that allows communicating with subprocesses and watching for their completion.
+
+class asyncio.subprocess.Process
+An object that wraps OS processes created by the create_subprocess_exec() and create_subprocess_shell() functions.
+
+This class is designed to have a similar API to the subprocess.Popen class, but there are some notable differences:
+
+unlike Popen, Process instances do not have an equivalent to the poll() method;
+
+the communicate() and wait() methods don’t have a timeout parameter: use the wait_for() function;
+
+the Process.wait() method is asynchronous, whereas subprocess.Popen.wait() method is implemented as a blocking busy loop;
+
+the universal_newlines parameter is not supported.
+
+This class is not thread safe.
+
+See also the Subprocess and Threads section.
+
+coroutine wait()
+Wait for the child process to terminate.
+
+Set and return the returncode attribute.
+
+Note This method can deadlock when using stdout=PIPE or stderr=PIPE and the child process generates so much output that it blocks waiting for the OS pipe buffer to accept more data. Use the communicate() method when using pipes to avoid this condition.
+coroutine communicate(input=None)
+Interact with process:
+
+send data to stdin (if input is not None);
+
+read data from stdout and stderr, until EOF is reached;
+
+wait for process to terminate.
+
+The optional input argument is the data (bytes object) that will be sent to the child process.
+
+Return a tuple (stdout_data, stderr_data).
+
+If either BrokenPipeError or ConnectionResetError exception is raised when writing input into stdin, the exception is ignored. This condition occurs when the process exits before all data are written into stdin.
+
+If it is desired to send data to the process’ stdin, the process needs to be created with stdin=PIPE. Similarly, to get anything other than None in the result tuple, the process has to be created with stdout=PIPE and/or stderr=PIPE arguments.
+
+Note, that the data read is buffered in memory, so do not use this method if the data size is large or unlimited.
+
+send_signal(signal)
+Sends the signal signal to the child process.
+
+Note On Windows, SIGTERM is an alias for terminate(). CTRL_C_EVENT and CTRL_BREAK_EVENT can be sent to processes started with a creationflags parameter which includes CREATE_NEW_PROCESS_GROUP.
+terminate()
+Stop the child process.
+
+On POSIX systems this method sends signal.SIGTERM to the child process.
+
+On Windows the Win32 API function TerminateProcess() is called to stop the child process.
+
+kill()
+Kill the child process.
+
+On POSIX systems this method sends SIGKILL to the child process.
+
+On Windows this method is an alias for terminate().
+
+stdin
+Standard input stream (StreamWriter) or None if the process was created with stdin=None.
+
+stdout
+Standard output stream (StreamReader) or None if the process was created with stdout=None.
+
+stderr
+Standard error stream (StreamReader) or None if the process was created with stderr=None.
+
+Warning Use the communicate() method rather than process.stdin.write(), await process.stdout.read() or await process.stderr.read(). This avoids deadlocks due to streams pausing reading or writing and blocking the child process.
+pid
+Process identification number (PID).
+
+Note that for processes created by the create_subprocess_shell() function, this attribute is the PID of the spawned shell.
+
+returncode
+Return code of the process when it exits.
+
+A None value indicates that the process has not terminated yet.
+
+A negative value -N indicates that the child was terminated by signal N (POSIX only).
+
+Subprocess and Threads
+Standard asyncio event loop supports running subprocesses from different threads by default.
+
+On Windows subprocesses are provided by ProactorEventLoop only (default), SelectorEventLoop has no subprocess support.
+
+On UNIX child watchers are used for subprocess finish waiting, see Process Watchers for more info.
+
+Changed in version 3.8: UNIX switched to use ThreadedChildWatcher for spawning subprocesses from different threads without any limitation.
+
+Spawning a subprocess with inactive current child watcher raises RuntimeError.
+
+Note that alternative event loop implementations might have own limitations; please refer to their documentation.
+
+See also The Concurrency and multithreading in asyncio section.
+Examples
+An example using the Process class to control a subprocess and the StreamReader class to read from its standard output.
+
+The subprocess is created by the create_subprocess_exec() function:
+
+import asyncio
+import sys
+
+async def get_date():
+    code = 'import datetime; print(datetime.datetime.now())'
+
+    # Create the subprocess; redirect the standard output
+    # into a pipe.
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable, '-c', code,
+        stdout=asyncio.subprocess.PIPE)
+
+    # Read one line of output.
+    data = await proc.stdout.readline()
+    line = data.decode('ascii').rstrip()
+
+    # Wait for the subprocess exit.
+    await proc.wait()
+    return line
+
+date = asyncio.run(get_date())
+print(f"Current date: {date}")
+See also the same example written using low-level APIs.Queue
+class asyncio.Queue(maxsize=0)
+A first in, first out (FIFO) queue.
+
+If maxsize is less than or equal to zero, the queue size is infinite. If it is an integer greater than 0, then await put() blocks when the queue reaches maxsize until an item is removed by get().
+
+Unlike the standard library threading queue, the size of the queue is always known and can be returned by calling the qsize() method.
+
+Changed in version 3.10: Removed the loop parameter.
+
+This class is not thread safe.
+
+maxsize
+Number of items allowed in the queue.
+
+empty()
+Return True if the queue is empty, False otherwise.
+
+full()
+Return True if there are maxsize items in the queue.
+
+If the queue was initialized with maxsize=0 (the default), then full() never returns True.
+
+coroutine get()
+Remove and return an item from the queue. If queue is empty, wait until an item is available.
+
+get_nowait()
+Return an item if one is immediately available, else raise QueueEmpty.
+
+coroutine join()
+Block until all items in the queue have been received and processed.
+
+The count of unfinished tasks goes up whenever an item is added to the queue. The count goes down whenever a consumer coroutine calls task_done() to indicate that the item was retrieved and all work on it is complete. When the count of unfinished tasks drops to zero, join() unblocks.
+
+coroutine put(item)
+Put an item into the queue. If the queue is full, wait until a free slot is available before adding the item.
+
+put_nowait(item)
+Put an item into the queue without blocking.
+
+If no free slot is immediately available, raise QueueFull.
+
+qsize()
+Return the number of items in the queue.
+
+task_done()
+Indicate that a formerly enqueued task is complete.
+
+Used by queue consumers. For each get() used to fetch a task, a subsequent call to task_done() tells the queue that the processing on the task is complete.
+
+If a join() is currently blocking, it will resume when all items have been processed (meaning that a task_done() call was received for every item that had been put() into the queue).
+
+Raises ValueError if called more times than there were items placed in the queue.
+
+Priority Queue
+class asyncio.PriorityQueue
+A variant of Queue; retrieves entries in priority order (lowest first).
+
+Entries are typically tuples of the form (priority_number, data).
+
+LIFO Queue
+class asyncio.LifoQueue
+A variant of Queue that retrieves most recently added entries first (last in, first out).
+
+Exceptions
+exception asyncio.QueueEmpty
+This exception is raised when the get_nowait() method is called on an empty queue.
+
+exception asyncio.QueueFull
+Exception raised when the put_nowait() method is called on a queue that has reached its maxsize.
+
+Examples
+Queues can be used to distribute workload between several concurrent tasks:
+
+import asyncio
+import random
+import time
+
+
+async def worker(name, queue):
+    while True:
+        # Get a "work item" out of the queue.
+        sleep_for = await queue.get()
+
+        # Sleep for the "sleep_for" seconds.
+        await asyncio.sleep(sleep_for)
+
+        # Notify the queue that the "work item" has been processed.
+        queue.task_done()
+
+        print(f'{name} has slept for {sleep_for:.2f} seconds')
+
+
+async def main():
+    # Create a queue that we will use to store our "workload".
+    queue = asyncio.Queue()
+
+    # Generate random timings and put them into the queue.
+    total_sleep_time = 0
+    for _ in range(20):
+        sleep_for = random.uniform(0.05, 1.0)
+        total_sleep_time += sleep_for
+        queue.put_nowait(sleep_for)
+
+    # Create three worker tasks to process the queue concurrently.
+    tasks = []
+    for i in range(3):
+        task = asyncio.create_task(worker(f'worker-{i}', queue))
+        tasks.append(task)
+
+    # Wait until the queue is fully processed.
+    started_at = time.monotonic()
+    await queue.join()
+    total_slept_for = time.monotonic() - started_at
+
+    # Cancel our worker tasks.
+    for task in tasks:
+        task.cancel()
+    # Wait until all worker tasks are cancelled.
+    await asyncio.gather(*tasks, return_exceptions=True)
+
+    print('====')
+    print(f'3 workers slept in parallel for {total_slept_for:.2f} seconds')
+    print(f'total expected sleep time: {total_sleep_time:.2f} seconds')
+
+
+asyncio.run(main())Exceptions
+Source code: Lib/asyncio/exceptions.py
+
+exception asyncio.TimeoutError
+The operation has exceeded the given deadline.
+
+Important This exception is different from the builtin TimeoutError exception.
+exception asyncio.CancelledError
+The operation has been cancelled.
+
+This exception can be caught to perform custom operations when asyncio Tasks are cancelled. In almost all situations the exception must be re-raised.
+
+Changed in version 3.8: CancelledError is now a subclass of BaseException.
+
+exception asyncio.InvalidStateError
+Invalid internal state of Task or Future.
+
+Can be raised in situations like setting a result value for a Future object that already has a result value set.
+
+exception asyncio.SendfileNotAvailableError
+The “sendfile” syscall is not available for the given socket or file type.
+
+A subclass of RuntimeError.
+
+exception asyncio.IncompleteReadError
+The requested read operation did not complete fully.
+
+Raised by the asyncio stream APIs.
+
+This exception is a subclass of EOFError.
+
+expected
+The total number (int) of expected bytes.
+
+partial
+A string of bytes read before the end of stream was reached.
+
+exception asyncio.LimitOverrunError¶
+Reached the buffer size limit while looking for a separator.
+
+Raised by the asyncio stream APIs.
+
+consumed
+The total number of to be consumed bytes.Event Loop
+Source code: Lib/asyncio/events.py, Lib/asyncio/base_events.py
+
+Preface
+
+The event loop is the core of every asyncio application. Event loops run asynchronous tasks and callbacks, perform network IO operations, and run subprocesses.
+
+Application developers should typically use the high-level asyncio functions, such as asyncio.run(), and should rarely need to reference the loop object or call its methods. This section is intended mostly for authors of lower-level code, libraries, and frameworks, who need finer control over the event loop behavior.
+
+Obtaining the Event Loop
+
+The following low-level functions can be used to get, set, or create an event loop:
+
+asyncio.get_running_loop()
+Return the running event loop in the current OS thread.
+
+If there is no running event loop a RuntimeError is raised. This function can only be called from a coroutine or a callback.
+
+New in version 3.7.
+
+asyncio.get_event_loop()
+Get the current event loop.
+
+If there is no current event loop set in the current OS thread, the OS thread is main, and set_event_loop() has not yet been called, asyncio will create a new event loop and set it as the current one.
+
+Because this function has rather complex behavior (especially when custom event loop policies are in use), using the get_running_loop() function is preferred to get_event_loop() in coroutines and callbacks.
+
+Consider also using the asyncio.run() function instead of using lower level functions to manually create and close an event loop.
+
+Deprecated since version 3.10: Deprecation warning is emitted if there is no running event loop. In future Python releases, this function will be an alias of get_running_loop().
+
+asyncio.set_event_loop(loop)
+Set loop as a current event loop for the current OS thread.
+
+asyncio.new_event_loop()
+Create and return a new event loop object.
+
+Note that the behaviour of get_event_loop(), set_event_loop(), and new_event_loop() functions can be altered by setting a custom event loop policy.
+
+Contents
+
+This documentation page contains the following sections:
+
+The Event Loop Methods section is the reference documentation of the event loop APIs;
+
+The Callback Handles section documents the Handle and TimerHandle instances which are returned from scheduling methods such as loop.call_soon() and loop.call_later();
+
+The Server Objects section documents types returned from event loop methods like loop.create_server();
+
+The Event Loop Implementations section documents the SelectorEventLoop and ProactorEventLoop classes;
+
+The Examples section showcases how to work with some event loop APIs.
+
+Event Loop Methods
+Event loops have low-level APIs for the following:
+
+Running and stopping the loop
+
+Scheduling callbacks
+
+Scheduling delayed callbacks
+
+Creating Futures and Tasks
+
+Opening network connections
+
+Creating network servers
+
+Transferring files
+
+TLS Upgrade
+
+Watching file descriptors
+
+Working with socket objects directly
+
+DNS
+
+Working with pipes
+
+Unix signals
+
+Executing code in thread or process pools
+
+Error Handling API
+
+Enabling debug mode
+
+Running Subprocesses
+
+Running and stopping the loop
+loop.run_until_complete(future)
+Run until the future (an instance of Future) has completed.
+
+If the argument is a coroutine object it is implicitly scheduled to run as a asyncio.Task.
+
+Return the Future’s result or raise its exception.
+
+loop.run_forever()
+Run the event loop until stop() is called.
+
+If stop() is called before run_forever() is called, the loop will poll the I/O selector once with a timeout of zero, run all callbacks scheduled in response to I/O events (and those that were already scheduled), and then exit.
+
+If stop() is called while run_forever() is running, the loop will run the current batch of callbacks and then exit. Note that new callbacks scheduled by callbacks will not run in this case; instead, they will run the next time run_forever() or run_until_complete() is called.
+
+loop.stop()
+Stop the event loop.
+
+loop.is_running()
+Return True if the event loop is currently running.
+
+loop.is_closed()
+Return True if the event loop was closed.
+
+loop.close()
+Close the event loop.
+
+The loop must not be running when this function is called. Any pending callbacks will be discarded.
+
+This method clears all queues and shuts down the executor, but does not wait for the executor to finish.
+
+This method is idempotent and irreversible. No other methods should be called after the event loop is closed.
+
+coroutine loop.shutdown_asyncgens()
+Schedule all currently open asynchronous generator objects to close with an aclose() call. After calling this method, the event loop will issue a warning if a new asynchronous generator is iterated. This should be used to reliably finalize all scheduled asynchronous generators.
+
+Note that there is no need to call this function when asyncio.run() is used.
+
+Example:
+
+try:
+    loop.run_forever()
+finally:
+    loop.run_until_complete(loop.shutdown_asyncgens())
+    loop.close()
+New in version 3.6.
+
+coroutine loop.shutdown_default_executor()
+Schedule the closure of the default executor and wait for it to join all of the threads in the ThreadPoolExecutor. After calling this method, a RuntimeError will be raised if loop.run_in_executor() is called while using the default executor.
+
+Note that there is no need to call this function when asyncio.run() is used.
+
+New in version 3.9.
+
+Scheduling callbacks
+loop.call_soon(callback, *args, context=None)
+Schedule the callback callback to be called with args arguments at the next iteration of the event loop.
+
+Callbacks are called in the order in which they are registered. Each callback will be called exactly once.
+
+An optional keyword-only context argument allows specifying a custom contextvars.Context for the callback to run in. The current context is used when no context is provided.
+
+An instance of asyncio.Handle is returned, which can be used later to cancel the callback.
+
+This method is not thread-safe.
+
+loop.call_soon_threadsafe(callback, *args, context=None)
+A thread-safe variant of call_soon(). Must be used to schedule callbacks from another thread.
+
+Raises RuntimeError if called on a loop that’s been closed. This can happen on a secondary thread when the main application is shutting down.
+
+See the concurrency and multithreading section of the documentation.
+
+Changed in version 3.7: The context keyword-only parameter was added. See PEP 567 for more details.
+
+Note Most asyncio scheduling functions don’t allow passing keyword arguments. To do that, use functools.partial():
+# will schedule "print("Hello", flush=True)"
+loop.call_soon(
+    functools.partial(print, "Hello", flush=True))
+Using partial objects is usually more convenient than using lambdas, as asyncio can render partial objects better in debug and error messages.
+
+Scheduling delayed callbacks
+Event loop provides mechanisms to schedule callback functions to be called at some point in the future. Event loop uses monotonic clocks to track time.
+
+loop.call_later(delay, callback, *args, context=None)
+Schedule callback to be called after the given delay number of seconds (can be either an int or a float).
+
+An instance of asyncio.TimerHandle is returned which can be used to cancel the callback.
+
+callback will be called exactly once. If two callbacks are scheduled for exactly the same time, the order in which they are called is undefined.
+
+The optional positional args will be passed to the callback when it is called. If you want the callback to be called with keyword arguments use functools.partial().
+
+An optional keyword-only context argument allows specifying a custom contextvars.Context for the callback to run in. The current context is used when no context is provided.
+
+Changed in version 3.7: The context keyword-only parameter was added. See PEP 567 for more details.
+
+Changed in version 3.8: In Python 3.7 and earlier with the default event loop implementation, the delay could not exceed one day. This has been fixed in Python 3.8.
+
+loop.call_at(when, callback, *args, context=None)
+Schedule callback to be called at the given absolute timestamp when (an int or a float), using the same time reference as loop.time().
+
+This method’s behavior is the same as call_later().
+
+An instance of asyncio.TimerHandle is returned which can be used to cancel the callback.
+
+Changed in version 3.7: The context keyword-only parameter was added. See PEP 567 for more details.
+
+Changed in version 3.8: In Python 3.7 and earlier with the default event loop implementation, the difference between when and the current time could not exceed one day. This has been fixed in Python 3.8.
+
+loop.time()
+Return the current time, as a float value, according to the event loop’s internal monotonic clock.
+
+Note
+Changed in version 3.8: In Python 3.7 and earlier timeouts (relative delay or absolute when) should not exceed one day. This has been fixed in Python 3.8.
+
+See also The asyncio.sleep() function.
+Creating Futures and Tasks
+loop.create_future()
+Create an asyncio.Future object attached to the event loop.
+
+This is the preferred way to create Futures in asyncio. This lets third-party event loops provide alternative implementations of the Future object (with better performance or instrumentation).
+
+New in version 3.5.2.
+
+loop.create_task(coro, *, name=None)
+Schedule the execution of coroutine coro. Return a Task object.
+
+Third-party event loops can use their own subclass of Task for interoperability. In this case, the result type is a subclass of Task.
+
+If the name argument is provided and not None, it is set as the name of the task using Task.set_name().
+
+Changed in version 3.8: Added the name parameter.
+
+loop.set_task_factory(factory)
+Set a task factory that will be used by loop.create_task().
+
+If factory is None the default task factory will be set. Otherwise, factory must be a callable with the signature matching (loop, coro), where loop is a reference to the active event loop, and coro is a coroutine object. The callable must return a asyncio.Future-compatible object.
+
+loop.get_task_factory()
+Return a task factory or None if the default one is in use.
+
+Opening network connections
+coroutine loop.create_connection(protocol_factory, host=None, port=None, *, ssl=None, family=0, proto=0, flags=0, sock=None, local_addr=None, server_hostname=None, ssl_handshake_timeout=None, happy_eyeballs_delay=None, interleave=None)
+Open a streaming transport connection to a given address specified by host and port.
+
+The socket family can be either AF_INET or AF_INET6 depending on host (or the family argument, if provided).
+
+The socket type will be SOCK_STREAM.
+
+protocol_factory must be a callable returning an asyncio protocol implementation.
+
+This method will try to establish the connection in the background. When successful, it returns a (transport, protocol) pair.
+
+The chronological synopsis of the underlying operation is as follows:
+
+The connection is established and a transport is created for it.
+
+protocol_factory is called without arguments and is expected to return a protocol instance.
+
+The protocol instance is coupled with the transport by calling its connection_made() method.
+
+A (transport, protocol) tuple is returned on success.
+
+The created transport is an implementation-dependent bidirectional stream.
+
+Other arguments:
+
+ssl: if given and not false, a SSL/TLS transport is created (by default a plain TCP transport is created). If ssl is a ssl.SSLContext object, this context is used to create the transport; if ssl is True, a default context returned from ssl.create_default_context() is used.
+
+See also SSL/TLS security considerations
+server_hostname sets or overrides the hostname that the target server’s certificate will be matched against. Should only be passed if ssl is not None. By default the value of the host argument is used. If host is empty, there is no default and you must pass a value for server_hostname. If server_hostname is an empty string, hostname matching is disabled (which is a serious security risk, allowing for potential man-in-the-middle attacks).
+
+family, proto, flags are the optional address family, protocol and flags to be passed through to getaddrinfo() for host resolution. If given, these should all be integers from the corresponding socket module constants.
+
+happy_eyeballs_delay, if given, enables Happy Eyeballs for this connection. It should be a floating-point number representing the amount of time in seconds to wait for a connection attempt to complete, before starting the next attempt in parallel. This is the “Connection Attempt Delay” as defined in RFC 8305. A sensible default value recommended by the RFC is 0.25 (250 milliseconds).
+
+interleave controls address reordering when a host name resolves to multiple IP addresses. If 0 or unspecified, no reordering is done, and addresses are tried in the order returned by getaddrinfo(). If a positive integer is specified, the addresses are interleaved by address family, and the given integer is interpreted as “First Address Family Count” as defined in RFC 8305. The default is 0 if happy_eyeballs_delay is not specified, and 1 if it is.
+
+sock, if given, should be an existing, already connected socket.socket object to be used by the transport. If sock is given, none of host, port, family, proto, flags, happy_eyeballs_delay, interleave and local_addr should be specified.
+
+Note The sock argument transfers ownership of the socket to the transport created. To close the socket, call the transport’s close() method.
+local_addr, if given, is a (local_host, local_port) tuple used to bind the socket locally. The local_host and local_port are looked up using getaddrinfo(), similarly to host and port.
+
+ssl_handshake_timeout is (for a TLS connection) the time in seconds to wait for the TLS handshake to complete before aborting the connection. 60.0 seconds if None (default).
+
+Changed in version 3.5: Added support for SSL/TLS in ProactorEventLoop.
+
+Changed in version 3.6: The socket option TCP_NODELAY is set by default for all TCP connections.
+
+Changed in version 3.7: Added the ssl_handshake_timeout parameter.
+
+Changed in version 3.8: Added the happy_eyeballs_delay and interleave parameters.
+
+Happy Eyeballs Algorithm: Success with Dual-Stack Hosts. When a server’s IPv4 path and protocol are working, but the server’s IPv6 path and protocol are not working, a dual-stack client application experiences significant connection delay compared to an IPv4-only client. This is undesirable because it causes the dual- stack client to have a worse user experience. This document specifies requirements for algorithms that reduce this user-visible delay and provides an algorithm.
+
+For more information: https://tools.ietf.org/html/rfc6555
+
+See also The open_connection() function is a high-level alternative API. It returns a pair of (StreamReader, StreamWriter) that can be used directly in async/await code.
+coroutine loop.create_datagram_endpoint(protocol_factory, local_addr=None, remote_addr=None, *, family=0, proto=0, flags=0, reuse_address=None, reuse_port=None, allow_broadcast=None, sock=None)
+Note The parameter reuse_address is no longer supported, as using SO_REUSEADDR poses a significant security concern for UDP. Explicitly passing reuse_address=True will raise an exception.
+When multiple processes with differing UIDs assign sockets to an identical UDP socket address with SO_REUSEADDR, incoming packets can become randomly distributed among the sockets.
+
+For supported platforms, reuse_port can be used as a replacement for similar functionality. With reuse_port, SO_REUSEPORT is used instead, which specifically prevents processes with differing UIDs from assigning sockets to the same socket address.
+
+Create a datagram connection.
+
+The socket family can be either AF_INET, AF_INET6, or AF_UNIX, depending on host (or the family argument, if provided).
+
+The socket type will be SOCK_DGRAM.
+
+protocol_factory must be a callable returning a protocol implementation.
+
+A tuple of (transport, protocol) is returned on success.
+
+Other arguments:
+
+local_addr, if given, is a (local_host, local_port) tuple used to bind the socket locally. The local_host and local_port are looked up using getaddrinfo().
+
+remote_addr, if given, is a (remote_host, remote_port) tuple used to connect the socket to a remote address. The remote_host and remote_port are looked up using getaddrinfo().
+
+family, proto, flags are the optional address family, protocol and flags to be passed through to getaddrinfo() for host resolution. If given, these should all be integers from the corresponding socket module constants.
+
+reuse_port tells the kernel to allow this endpoint to be bound to the same port as other existing endpoints are bound to, so long as they all set this flag when being created. This option is not supported on Windows and some Unixes. If the SO_REUSEPORT constant is not defined then this capability is unsupported.
+
+allow_broadcast tells the kernel to allow this endpoint to send messages to the broadcast address.
+
+sock can optionally be specified in order to use a preexisting, already connected, socket.socket object to be used by the transport. If specified, local_addr and remote_addr should be omitted (must be None).
+
+Note The sock argument transfers ownership of the socket to the transport created. To close the socket, call the transport’s close() method.
+See UDP echo client protocol and UDP echo server protocol examples.
+
+Changed in version 3.4.4: The family, proto, flags, reuse_address, reuse_port, *allow_broadcast, and sock parameters were added.
+
+Changed in version 3.8.1: The reuse_address parameter is no longer supported due to security concerns.
+
+Changed in version 3.8: Added support for Windows.
+
+coroutine loop.create_unix_connection(protocol_factory, path=None, *, ssl=None, sock=None, server_hostname=None, ssl_handshake_timeout=None)
+Create a Unix connection.
+
+The socket family will be AF_UNIX; socket type will be SOCK_STREAM.
+
+A tuple of (transport, protocol) is returned on success.
+
+path is the name of a Unix domain socket and is required, unless a sock parameter is specified. Abstract Unix sockets, str, bytes, and Path paths are supported.
+
+See the documentation of the loop.create_connection() method for information about arguments to this method.
+
+Availability: Unix.
+
+Changed in version 3.7: Added the ssl_handshake_timeout parameter. The path parameter can now be a path-like object.
+
+Creating network servers
+coroutine loop.create_server(protocol_factory, host=None, port=None, *, family=socket.AF_UNSPEC, flags=socket.AI_PASSIVE, sock=None, backlog=100, ssl=None, reuse_address=None, reuse_port=None, ssl_handshake_timeout=None, start_serving=True)
+Create a TCP server (socket type SOCK_STREAM) listening on port of the host address.
+
+Returns a Server object.
+
+Arguments:
+
+protocol_factory must be a callable returning a protocol implementation.
+
+The host parameter can be set to several types which determine where the server would be listening:
+
+If host is a string, the TCP server is bound to a single network interface specified by host.
+
+If host is a sequence of strings, the TCP server is bound to all network interfaces specified by the sequence.
+
+If host is an empty string or None, all interfaces are assumed and a list of multiple sockets will be returned (most likely one for IPv4 and another one for IPv6).
+
+The port parameter can be set to specify which port the server should listen on. If 0 or None (the default), a random unused port will be selected (note that if host resolves to multiple network interfaces, a different random port will be selected for each interface).
+
+family can be set to either socket.AF_INET or AF_INET6 to force the socket to use IPv4 or IPv6. If not set, the family will be determined from host name (defaults to AF_UNSPEC).
+
+flags is a bitmask for getaddrinfo().
+
+sock can optionally be specified in order to use a preexisting socket object. If specified, host and port must not be specified.
+
+Note The sock argument transfers ownership of the socket to the server created. To close the socket, call the server’s close() method.
+backlog is the maximum number of queued connections passed to listen() (defaults to 100).
+
+ssl can be set to an SSLContext instance to enable TLS over the accepted connections.
+
+reuse_address tells the kernel to reuse a local socket in TIME_WAIT state, without waiting for its natural timeout to expire. If not specified will automatically be set to True on Unix.
+
+reuse_port tells the kernel to allow this endpoint to be bound to the same port as other existing endpoints are bound to, so long as they all set this flag when being created. This option is not supported on Windows.
+
+ssl_handshake_timeout is (for a TLS server) the time in seconds to wait for the TLS handshake to complete before aborting the connection. 60.0 seconds if None (default).
+
+start_serving set to True (the default) causes the created server to start accepting connections immediately. When set to False, the user should await on Server.start_serving() or Server.serve_forever() to make the server to start accepting connections.
+
+Changed in version 3.5: Added support for SSL/TLS in ProactorEventLoop.
+
+Changed in version 3.5.1: The host parameter can be a sequence of strings.
+
+Changed in version 3.6: Added ssl_handshake_timeout and start_serving parameters. The socket option TCP_NODELAY is set by default for all TCP connections.
+
+See also The start_server() function is a higher-level alternative API that returns a pair of StreamReader and StreamWriter that can be used in an async/await code.
+coroutine loop.create_unix_server(protocol_factory, path=None, *, sock=None, backlog=100, ssl=None, ssl_handshake_timeout=None, start_serving=True)
+Similar to loop.create_server() but works with the AF_UNIX socket family.
+
+path is the name of a Unix domain socket, and is required, unless a sock argument is provided. Abstract Unix sockets, str, bytes, and Path paths are supported.
+
+See the documentation of the loop.create_server() method for information about arguments to this method.
+
+Availability: Unix.
+
+Changed in version 3.7: Added the ssl_handshake_timeout and start_serving parameters. The path parameter can now be a Path object.
+
+coroutine loop.connect_accepted_socket(protocol_factory, sock, *, ssl=None, ssl_handshake_timeout=None)
+Wrap an already accepted connection into a transport/protocol pair.
+
+This method can be used by servers that accept connections outside of asyncio but that use asyncio to handle them.
+
+Parameters:
+
+protocol_factory must be a callable returning a protocol implementation.
+
+sock is a preexisting socket object returned from socket.accept.
+
+Note The sock argument transfers ownership of the socket to the transport created. To close the socket, call the transport’s close() method.
+ssl can be set to an SSLContext to enable SSL over the accepted connections.
+
+ssl_handshake_timeout is (for an SSL connection) the time in seconds to wait for the SSL handshake to complete before aborting the connection. 60.0 seconds if None (default).
+
+Returns a (transport, protocol) pair.
+
+New in version 3.5.3.
+
+Changed in version 3.7: Added the ssl_handshake_timeout parameter.
+
+Transferring files
+coroutine loop.sendfile(transport, file, offset=0, count=None, *, fallback=True)
+Send a file over a transport. Return the total number of bytes sent.
+
+The method uses high-performance os.sendfile() if available.
+
+file must be a regular file object opened in binary mode.
+
+offset tells from where to start reading the file. If specified, count is the total number of bytes to transmit as opposed to sending the file until EOF is reached. File position is always updated, even when this method raises an error, and file.tell() can be used to obtain the actual number of bytes sent.
+
+fallback set to True makes asyncio to manually read and send the file when the platform does not support the sendfile system call (e.g. Windows or SSL socket on Unix).
+
+Raise SendfileNotAvailableError if the system does not support the sendfile syscall and fallback is False.
+
+New in version 3.7.
+
+TLS Upgrade
+coroutine loop.start_tls(transport, protocol, sslcontext, *, server_side=False, server_hostname=None, ssl_handshake_timeout=None)
+Upgrade an existing transport-based connection to TLS.
+
+Return a new transport instance, that the protocol must start using immediately after the await. The transport instance passed to the start_tls method should never be used again.
+
+Parameters:
+
+transport and protocol instances that methods like create_server() and create_connection() return.
+
+sslcontext: a configured instance of SSLContext.
+
+server_side pass True when a server-side connection is being upgraded (like the one created by create_server()).
+
+server_hostname: sets or overrides the host name that the target server’s certificate will be matched against.
+
+ssl_handshake_timeout is (for a TLS connection) the time in seconds to wait for the TLS handshake to complete before aborting the connection. 60.0 seconds if None (default).
+
+New in version 3.7.
+
+Watching file descriptors
+loop.add_reader(fd, callback, *args)
+Start monitoring the fd file descriptor for read availability and invoke callback with the specified arguments once fd is available for reading.
+
+loop.remove_reader(fd)
+Stop monitoring the fd file descriptor for read availability.
+
+loop.add_writer(fd, callback, *args)
+Start monitoring the fd file descriptor for write availability and invoke callback with the specified arguments once fd is available for writing.
+
+Use functools.partial() to pass keyword arguments to callback.
+
+loop.remove_writer(fd)
+Stop monitoring the fd file descriptor for write availability.
+
+See also Platform Support section for some limitations of these methods.
+
+Working with socket objects directly
+In general, protocol implementations that use transport-based APIs such as loop.create_connection() and loop.create_server() are faster than implementations that work with sockets directly. However, there are some use cases when performance is not critical, and working with socket objects directly is more convenient.
+
+coroutine loop.sock_recv(sock, nbytes)
+Receive up to nbytes from sock. Asynchronous version of socket.recv().
+
+Return the received data as a bytes object.
+
+sock must be a non-blocking socket.
+
+Changed in version 3.7: Even though this method was always documented as a coroutine method, releases before Python 3.7 returned a Future. Since Python 3.7 this is an async def method.
+
+coroutine loop.sock_recv_into(sock, buf)
+Receive data from sock into the buf buffer. Modeled after the blocking socket.recv_into() method.
+
+Return the number of bytes written to the buffer.
+
+sock must be a non-blocking socket.
+
+New in version 3.7.
+
+coroutine loop.sock_sendall(sock, data)
+Send data to the sock socket. Asynchronous version of socket.sendall().
+
+This method continues to send to the socket until either all data in data has been sent or an error occurs. None is returned on success. On error, an exception is raised. Additionally, there is no way to determine how much data, if any, was successfully processed by the receiving end of the connection.
+
+sock must be a non-blocking socket.
+
+Changed in version 3.7: Even though the method was always documented as a coroutine method, before Python 3.7 it returned an Future. Since Python 3.7, this is an async def method.
+
+coroutine loop.sock_connect(sock, address)
+Connect sock to a remote socket at address.
+
+Asynchronous version of socket.connect().
+
+sock must be a non-blocking socket.
+
+Changed in version 3.5.2: address no longer needs to be resolved. sock_connect will try to check if the address is already resolved by calling socket.inet_pton(). If not, loop.getaddrinfo() will be used to resolve the address.
+
+See also loop.create_connection() and asyncio.open_connection().
+coroutine loop.sock_accept(sock)
+Accept a connection. Modeled after the blocking socket.accept() method.
+
+The socket must be bound to an address and listening for connections. The return value is a pair (conn, address) where conn is a new socket object usable to send and receive data on the connection, and address is the address bound to the socket on the other end of the connection.
+
+sock must be a non-blocking socket.
+
+Changed in version 3.7: Even though the method was always documented as a coroutine method, before Python 3.7 it returned a Future. Since Python 3.7, this is an async def method.
+
+See also loop.create_server() and start_server().
+coroutine loop.sock_sendfile(sock, file, offset=0, count=None, *, fallback=True)
+Send a file using high-performance os.sendfile if possible. Return the total number of bytes sent.
+
+Asynchronous version of socket.sendfile().
+
+sock must be a non-blocking socket.SOCK_STREAM socket.
+
+file must be a regular file object open in binary mode.
+
+offset tells from where to start reading the file. If specified, count is the total number of bytes to transmit as opposed to sending the file until EOF is reached. File position is always updated, even when this method raises an error, and file.tell() can be used to obtain the actual number of bytes sent.
+
+fallback, when set to True, makes asyncio manually read and send the file when the platform does not support the sendfile syscall (e.g. Windows or SSL socket on Unix).
+
+Raise SendfileNotAvailableError if the system does not support sendfile syscall and fallback is False.
+
+sock must be a non-blocking socket.
+
+New in version 3.7.
+
+DNS
+coroutine loop.getaddrinfo(host, port, *, family=0, type=0, proto=0, flags=0)
+Asynchronous version of socket.getaddrinfo().
+
+coroutine loop.getnameinfo(sockaddr, flags=0)
+Asynchronous version of socket.getnameinfo().
+
+Changed in version 3.7: Both getaddrinfo and getnameinfo methods were always documented to return a coroutine, but prior to Python 3.7 they were, in fact, returning asyncio.Future objects. Starting with Python 3.7 both methods are coroutines.
+
+Working with pipes
+coroutine loop.connect_read_pipe(protocol_factory, pipe)
+Register the read end of pipe in the event loop.
+
+protocol_factory must be a callable returning an asyncio protocol implementation.
+
+pipe is a file-like object.
+
+Return pair (transport, protocol), where transport supports the ReadTransport interface and protocol is an object instantiated by the protocol_factory.
+
+With SelectorEventLoop event loop, the pipe is set to non-blocking mode.
+
+coroutine loop.connect_write_pipe(protocol_factory, pipe)
+Register the write end of pipe in the event loop.
+
+protocol_factory must be a callable returning an asyncio protocol implementation.
+
+pipe is file-like object.
+
+Return pair (transport, protocol), where transport supports WriteTransport interface and protocol is an object instantiated by the protocol_factory.
+
+With SelectorEventLoop event loop, the pipe is set to non-blocking mode.
+
+Note SelectorEventLoop does not support the above methods on Windows. Use ProactorEventLoop instead for Windows.
+See also The loop.subprocess_exec() and loop.subprocess_shell() methods.
+Unix signals
+loop.add_signal_handler(signum, callback, *args)
+Set callback as the handler for the signum signal.
+
+The callback will be invoked by loop, along with other queued callbacks and runnable coroutines of that event loop. Unlike signal handlers registered using signal.signal(), a callback registered with this function is allowed to interact with the event loop.
+
+Raise ValueError if the signal number is invalid or uncatchable. Raise RuntimeError if there is a problem setting up the handler.
+
+Use functools.partial() to pass keyword arguments to callback.
+
+Like signal.signal(), this function must be invoked in the main thread.
+
+loop.remove_signal_handler(sig)
+Remove the handler for the sig signal.
+
+Return True if the signal handler was removed, or False if no handler was set for the given signal.
+
+Availability: Unix.
+
+See also The signal module.
+Executing code in thread or process pools
+awaitable loop.run_in_executor(executor, func, *args)
+Arrange for func to be called in the specified executor.
+
+The executor argument should be an concurrent.futures.Executor instance. The default executor is used if executor is None.
+
+Example:
+
+import asyncio
+import concurrent.futures
+
+def blocking_io():
+    # File operations (such as logging) can block the
+    # event loop: run them in a thread pool.
+    with open('/dev/urandom', 'rb') as f:
+        return f.read(100)
+
+def cpu_bound():
+    # CPU-bound operations will block the event loop:
+    # in general it is preferable to run them in a
+    # process pool.
+    return sum(i * i for i in range(10 ** 7))
+
+async def main():
+    loop = asyncio.get_running_loop()
+
+    ## Options:
+
+    # 1. Run in the default loop's executor:
+    result = await loop.run_in_executor(
+        None, blocking_io)
+    print('default thread pool', result)
+
+    # 2. Run in a custom thread pool:
+    with concurrent.futures.ThreadPoolExecutor() as pool:
+        result = await loop.run_in_executor(
+            pool, blocking_io)
+        print('custom thread pool', result)
+
+    # 3. Run in a custom process pool:
+    with concurrent.futures.ProcessPoolExecutor() as pool:
+        result = await loop.run_in_executor(
+            pool, cpu_bound)
+        print('custom process pool', result)
+
+asyncio.run(main())
+This method returns a asyncio.Future object.
+
+Use functools.partial() to pass keyword arguments to func.
+
+Changed in version 3.5.3: loop.run_in_executor() no longer configures the max_workers of the thread pool executor it creates, instead leaving it up to the thread pool executor (ThreadPoolExecutor) to set the default.
+
+loop.set_default_executor(executor)
+Set executor as the default executor used by run_in_executor(). executor should be an instance of ThreadPoolExecutor.
+
+Deprecated since version 3.8: Using an executor that is not an instance of ThreadPoolExecutor is deprecated and will trigger an error in Python 3.9.
+
+executor must be an instance of concurrent.futures.ThreadPoolExecutor.
+
+Error Handling API
+Allows customizing how exceptions are handled in the event loop.
+
+loop.set_exception_handler(handler)
+Set handler as the new event loop exception handler.
+
+If handler is None, the default exception handler will be set. Otherwise, handler must be a callable with the signature matching (loop, context), where loop is a reference to the active event loop, and context is a dict object containing the details of the exception (see call_exception_handler() documentation for details about context).
+
+loop.get_exception_handler()
+Return the current exception handler, or None if no custom exception handler was set.
+
+New in version 3.5.2.
+
+loop.default_exception_handler(context)
+Default exception handler.
+
+This is called when an exception occurs and no exception handler is set. This can be called by a custom exception handler that wants to defer to the default handler behavior.
+
+context parameter has the same meaning as in call_exception_handler().
+
+loop.call_exception_handler(context)
+Call the current event loop exception handler.
+
+context is a dict object containing the following keys (new keys may be introduced in future Python versions):
+
+‘message’: Error message;
+
+‘exception’ (optional): Exception object;
+
+‘future’ (optional): asyncio.Future instance;
+
+‘task’ (optional): asyncio.Task instance;
+
+‘handle’ (optional): asyncio.Handle instance;
+
+‘protocol’ (optional): Protocol instance;
+
+‘transport’ (optional): Transport instance;
+
+‘socket’ (optional): socket.socket instance;
+
+‘asyncgen’ (optional): Asynchronous generator that caused
+the exception.
+
+Note This method should not be overloaded in subclassed event loops. For custom exception handling, use the set_exception_handler() method.
+Enabling debug mode
+loop.get_debug()
+Get the debug mode (bool) of the event loop.
+
+The default value is True if the environment variable PYTHONASYNCIODEBUG is set to a non-empty string, False otherwise.
+
+loop.set_debug(enabled: bool)
+Set the debug mode of the event loop.
+
+Changed in version 3.7: The new Python Development Mode can now also be used to enable the debug mode.
+
+See also The debug mode of asyncio.
+Running Subprocesses
+Methods described in this subsections are low-level. In regular async/await code consider using the high-level asyncio.create_subprocess_shell() and asyncio.create_subprocess_exec() convenience functions instead.
+
+Note On Windows, the default event loop ProactorEventLoop supports subprocesses, whereas SelectorEventLoop does not. See Subprocess Support on Windows for details.
+coroutine loop.subprocess_exec(protocol_factory, *args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kwargs)
+Create a subprocess from one or more string arguments specified by args.
+
+args must be a list of strings represented by:
+
+str;
+
+or bytes, encoded to the filesystem encoding.
+
+The first string specifies the program executable, and the remaining strings specify the arguments. Together, string arguments form the argv of the program.
+
+This is similar to the standard library subprocess.Popen class called with shell=False and the list of strings passed as the first argument; however, where Popen takes a single argument which is list of strings, subprocess_exec takes multiple string arguments.
+
+The protocol_factory must be a callable returning a subclass of the asyncio.SubprocessProtocol class.
+
+Other parameters:
+
+stdin can be any of these:
+
+a file-like object representing a pipe to be connected to the subprocess’s standard input stream using connect_write_pipe()
+
+the subprocess.PIPE constant (default) which will create a new pipe and connect it,
+
+the value None which will make the subprocess inherit the file descriptor from this process
+
+the subprocess.DEVNULL constant which indicates that the special os.devnull file will be used
+
+stdout can be any of these:
+
+a file-like object representing a pipe to be connected to the subprocess’s standard output stream using connect_write_pipe()
+
+the subprocess.PIPE constant (default) which will create a new pipe and connect it,
+
+the value None which will make the subprocess inherit the file descriptor from this process
+
+the subprocess.DEVNULL constant which indicates that the special os.devnull file will be used
+
+stderr can be any of these:
+
+a file-like object representing a pipe to be connected to the subprocess’s standard error stream using connect_write_pipe()
+
+the subprocess.PIPE constant (default) which will create a new pipe and connect it,
+
+the value None which will make the subprocess inherit the file descriptor from this process
+
+the subprocess.DEVNULL constant which indicates that the special os.devnull file will be used
+
+the subprocess.STDOUT constant which will connect the standard error stream to the process’ standard output stream
+
+All other keyword arguments are passed to subprocess.Popen without interpretation, except for bufsize, universal_newlines, shell, text, encoding and errors, which should not be specified at all.
+
+The asyncio subprocess API does not support decoding the streams as text. bytes.decode() can be used to convert the bytes returned from the stream to text.
+
+See the constructor of the subprocess.Popen class for documentation on other arguments.
+
+Returns a pair of (transport, protocol), where transport conforms to the asyncio.SubprocessTransport base class and protocol is an object instantiated by the protocol_factory.
+
+coroutine loop.subprocess_shell(protocol_factory, cmd, *, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kwargs)
+Create a subprocess from cmd, which can be a str or a bytes string encoded to the filesystem encoding, using the platform’s “shell” syntax.
+
+This is similar to the standard library subprocess.Popen class called with shell=True.
+
+The protocol_factory must be a callable returning a subclass of the SubprocessProtocol class.
+
+See subprocess_exec() for more details about the remaining arguments.
+
+Returns a pair of (transport, protocol), where transport conforms to the SubprocessTransport base class and protocol is an object instantiated by the protocol_factory.
+
+Note It is the application’s responsibility to ensure that all whitespace and special characters are quoted appropriately to avoid shell injection vulnerabilities. The shlex.quote() function can be used to properly escape whitespace and special characters in strings that are going to be used to construct shell commands.
+Callback Handles
+class asyncio.Handle
+A callback wrapper object returned by loop.call_soon(), loop.call_soon_threadsafe().
+
+cancel()
+Cancel the callback. If the callback has already been canceled or executed, this method has no effect.
+
+cancelled()
+Return True if the callback was cancelled.
+
+New in version 3.7.
+
+class asyncio.TimerHandle
+A callback wrapper object returned by loop.call_later(), and loop.call_at().
+
+This class is a subclass of Handle.
+
+when()
+Return a scheduled callback time as float seconds.
+
+The time is an absolute timestamp, using the same time reference as loop.time().
+
+New in version 3.7.
+
+Server Objects
+Server objects are created by loop.create_server(), loop.create_unix_server(), start_server(), and start_unix_server() functions.
+
+Do not instantiate the class directly.
+
+class asyncio.Server
+Server objects are asynchronous context managers. When used in an async with statement, it’s guaranteed that the Server object is closed and not accepting new connections when the async with statement is completed:
+
+srv = await loop.create_server(...)
+
+async with srv:
+    # some code
+
+# At this point, srv is closed and no longer accepts new connections.
+Changed in version 3.7: Server object is an asynchronous context manager since Python 3.7.
+
+close()
+Stop serving: close listening sockets and set the sockets attribute to None.
+
+The sockets that represent existing incoming client connections are left open.
+
+The server is closed asynchronously, use the wait_closed() coroutine to wait until the server is closed.
+
+get_loop()
+Return the event loop associated with the server object.
+
+New in version 3.7.
+
+coroutine start_serving()
+Start accepting connections.
+
+This method is idempotent, so it can be called when the server is already being serving.
+
+The start_serving keyword-only parameter to loop.create_server() and asyncio.start_server() allows creating a Server object that is not accepting connections initially. In this case Server.start_serving(), or Server.serve_forever() can be used to make the Server start accepting connections.
+
+New in version 3.7.
+
+coroutine serve_forever()
+Start accepting connections until the coroutine is cancelled. Cancellation of serve_forever task causes the server to be closed.
+
+This method can be called if the server is already accepting connections. Only one serve_forever task can exist per one Server object.
+
+Example:
+
+async def client_connected(reader, writer):
+    # Communicate with the client with
+    # reader/writer streams.  For example:
+    await reader.readline()
+
+async def main(host, port):
+    srv = await asyncio.start_server(
+        client_connected, host, port)
+    await srv.serve_forever()
+
+asyncio.run(main('127.0.0.1', 0))
+New in version 3.7.
+
+is_serving()
+Return True if the server is accepting new connections.
+
+New in version 3.7.
+
+coroutine wait_closed()
+Wait until the close() method completes.
+
+sockets
+List of socket.socket objects the server is listening on.
+
+Changed in version 3.7: Prior to Python 3.7 Server.sockets used to return an internal list of server sockets directly. In 3.7 a copy of that list is returned.
+
+Event Loop Implementations
+asyncio ships with two different event loop implementations: SelectorEventLoop and ProactorEventLoop.
+
+By default asyncio is configured to use SelectorEventLoop on Unix and ProactorEventLoop on Windows.
+
+class asyncio.SelectorEventLoop
+An event loop based on the selectors module.
+
+Uses the most efficient selector available for the given platform. It is also possible to manually configure the exact selector implementation to be used:
+
+import asyncio
+import selectors
+
+class MyPolicy(asyncio.DefaultEventLoopPolicy):
+   def new_event_loop(self):
+      selector = selectors.SelectSelector()
+      return asyncio.SelectorEventLoop(selector)
+
+asyncio.set_event_loop_policy(MyPolicy())
+Availability: Unix, Windows.
+
+class asyncio.ProactorEventLoop
+An event loop for Windows that uses “I/O Completion Ports” (IOCP).
+
+Availability: Windows.
+
+See also MSDN documentation on I/O Completion Ports.
+class asyncio.AbstractEventLoop
+Abstract base class for asyncio-compliant event loops.
+
+The Event Loop Methods section lists all methods that an alternative implementation of AbstractEventLoop should have defined.
+
+Examples
+Note that all examples in this section purposefully show how to use the low-level event loop APIs, such as loop.run_forever() and loop.call_soon(). Modern asyncio applications rarely need to be written this way; consider using the high-level functions like asyncio.run().
+
+Hello World with call_soon()
+An example using the loop.call_soon() method to schedule a callback. The callback displays "Hello World" and then stops the event loop:
+
+import asyncio
+
+def hello_world(loop):
+    """A callback to print 'Hello World' and stop the event loop"""
+    print('Hello World')
+    loop.stop()
+
+loop = asyncio.get_event_loop()
+
+# Schedule a call to hello_world()
+loop.call_soon(hello_world, loop)
+
+# Blocking call interrupted by loop.stop()
+try:
+    loop.run_forever()
+finally:
+    loop.close()
+See also A similar Hello World example created with a coroutine and the run() function.
+Display the current date with call_later()
+An example of a callback displaying the current date every second. The callback uses the loop.call_later() method to reschedule itself after 5 seconds, and then stops the event loop:
+
+import asyncio
+import datetime
+
+def display_date(end_time, loop):
+    print(datetime.datetime.now())
+    if (loop.time() + 1.0) < end_time:
+        loop.call_later(1, display_date, end_time, loop)
+    else:
+        loop.stop()
+
+loop = asyncio.get_event_loop()
+
+# Schedule the first call to display_date()
+end_time = loop.time() + 5.0
+loop.call_soon(display_date, end_time, loop)
+
+# Blocking call interrupted by loop.stop()
+try:
+    loop.run_forever()
+finally:
+    loop.close()
+See also A similar current date example created with a coroutine and the run() function.
+Watch a file descriptor for read events
+Wait until a file descriptor received some data using the loop.add_reader() method and then close the event loop:
+
+import asyncio
+from socket import socketpair
+
+# Create a pair of connected file descriptors
+rsock, wsock = socketpair()
+
+loop = asyncio.get_event_loop()
+
+def reader():
+    data = rsock.recv(100)
+    print("Received:", data.decode())
+
+    # We are done: unregister the file descriptor
+    loop.remove_reader(rsock)
+
+    # Stop the event loop
+    loop.stop()
+
+# Register the file descriptor for read event
+loop.add_reader(rsock, reader)
+
+# Simulate the reception of data from the network
+loop.call_soon(wsock.send, 'abc'.encode())
+
+try:
+    # Run the event loop
+    loop.run_forever()
+finally:
+    # We are done. Close sockets and the event loop.
+    rsock.close()
+    wsock.close()
+    loop.close()
+See also
+A similar example using transports, protocols, and the loop.create_connection() method.
+
+Another similar example using the high-level asyncio.open_connection() function and streams.
+
+Set signal handlers for SIGINT and SIGTERM
+(This signals example only works on Unix.)
+
+Register handlers for signals SIGINT and SIGTERM using the loop.add_signal_handler() method:
+
+import asyncio
+import functools
+import os
+import signal
+
+def ask_exit(signame, loop):
+    print("got signal %s: exit" % signame)
+    loop.stop()
+
+async def main():
+    loop = asyncio.get_running_loop()
+
+    for signame in {'SIGINT', 'SIGTERM'}:
+        loop.add_signal_handler(
+            getattr(signal, signame),
+            functools.partial(ask_exit, signame, loop))
+
+    await asyncio.sleep(3600)
+
+print("Event loop running for 1 hour, press Ctrl+C to interrupt.")
+print(f"pid {os.getpid()}: send SIGINT or SIGTERM to exit.")
+
+asyncio.run(main())Futures
+Source code: Lib/asyncio/futures.py, Lib/asyncio/base_futures.py
+
+Future objects are used to bridge low-level callback-based code with high-level async/await code.
+
+Future Functions
+asyncio.isfuture(obj)
+Return True if obj is either of:
+
+an instance of asyncio.Future,
+
+an instance of asyncio.Task,
+
+a Future-like object with a _asyncio_future_blocking attribute.
+
+New in version 3.5.
+
+asyncio.ensure_future(obj, *, loop=None)
+Return:
+
+obj argument as is, if obj is a Future, a Task, or a Future-like object (isfuture() is used for the test.)
+
+a Task object wrapping obj, if obj is a coroutine (iscoroutine() is used for the test); in this case the coroutine will be scheduled by ensure_future().
+
+a Task object that would await on obj, if obj is an awaitable (inspect.isawaitable() is used for the test.)
+
+If obj is neither of the above a TypeError is raised.
+
+Important See also the create_task() function which is the preferred way for creating new Tasks.
+Save a reference to the result of this function, to avoid a task disappearing mid-execution.
+
+Changed in version 3.5.1: The function accepts any awaitable object.
+
+Deprecated since version 3.10: Deprecation warning is emitted if obj is not a Future-like object and loop is not specified and there is no running event loop.
+
+asyncio.wrap_future(future, *, loop=None)
+Wrap a concurrent.futures.Future object in a asyncio.Future object.
+
+Deprecated since version 3.10: Deprecation warning is emitted if future is not a Future-like object and loop is not specified and there is no running event loop.
+
+Future Object
+class asyncio.Future(*, loop=None)
+A Future represents an eventual result of an asynchronous operation. Not thread-safe.
+
+Future is an awaitable object. Coroutines can await on Future objects until they either have a result or an exception set, or until they are cancelled. A Future can be awaited multiple times and the result is same.
+
+Typically Futures are used to enable low-level callback-based code (e.g. in protocols implemented using asyncio transports) to interoperate with high-level async/await code.
+
+The rule of thumb is to never expose Future objects in user-facing APIs, and the recommended way to create a Future object is to call loop.create_future(). This way alternative event loop implementations can inject their own optimized implementations of a Future object.
+
+Changed in version 3.7: Added support for the contextvars module.
+
+Deprecated since version 3.10: Deprecation warning is emitted if loop is not specified and there is no running event loop.
+
+result()
+Return the result of the Future.
+
+If the Future is done and has a result set by the set_result() method, the result value is returned.
+
+If the Future is done and has an exception set by the set_exception() method, this method raises the exception.
+
+If the Future has been cancelled, this method raises a CancelledError exception.
+
+If the Future’s result isn’t yet available, this method raises a InvalidStateError exception.
+
+set_result(result)
+Mark the Future as done and set its result.
+
+Raises a InvalidStateError error if the Future is already done.
+
+set_exception(exception)
+Mark the Future as done and set an exception.
+
+Raises a InvalidStateError error if the Future is already done.
+
+done()
+Return True if the Future is done.
+
+A Future is done if it was cancelled or if it has a result or an exception set with set_result() or set_exception() calls.
+
+cancelled()
+Return True if the Future was cancelled.
+
+The method is usually used to check if a Future is not cancelled before setting a result or an exception for it:
+
+if not fut.cancelled():
+    fut.set_result(42)
+add_done_callback(callback, *, context=None)
+Add a callback to be run when the Future is done.
+
+The callback is called with the Future object as its only argument.
+
+If the Future is already done when this method is called, the callback is scheduled with loop.call_soon().
+
+An optional keyword-only context argument allows specifying a custom contextvars.Context for the callback to run in. The current context is used when no context is provided.
+
+functools.partial() can be used to pass parameters to the callback, e.g.:
+
+# Call 'print("Future:", fut)' when "fut" is done.
+fut.add_done_callback(
+    functools.partial(print, "Future:"))
+Changed in version 3.7: The context keyword-only parameter was added. See PEP 567 for more details.
+
+remove_done_callback(callback)
+Remove callback from the callbacks list.
+
+Returns the number of callbacks removed, which is typically 1, unless a callback was added more than once.
+
+cancel(msg=None)
+Cancel the Future and schedule callbacks.
+
+If the Future is already done or cancelled, return False. Otherwise, change the Future’s state to cancelled, schedule the callbacks, and return True.
+
+Changed in version 3.9: Added the msg parameter.
+
+exception()
+Return the exception that was set on this Future.
+
+The exception (or None if no exception was set) is returned only if the Future is done.
+
+If the Future has been cancelled, this method raises a CancelledError exception.
+
+If the Future isn’t done yet, this method raises an InvalidStateError exception.
+
+get_loop()
+Return the event loop the Future object is bound to.
+
+New in version 3.7.
+
+This example creates a Future object, creates and schedules an asynchronous Task to set result for the Future, and waits until the Future has a result:
+
+async def set_after(fut, delay, value):
+    # Sleep for *delay* seconds.
+    await asyncio.sleep(delay)
+
+    # Set *value* as a result of *fut* Future.
+    fut.set_result(value)
+
+async def main():
+    # Get the current event loop.
+    loop = asyncio.get_running_loop()
+
+    # Create a new Future object.
+    fut = loop.create_future()
+
+    # Run "set_after()" coroutine in a parallel Task.
+    # We are using the low-level "loop.create_task()" API here because
+    # we already have a reference to the event loop at hand.
+    # Otherwise we could have just used "asyncio.create_task()".
+    loop.create_task(
+        set_after(fut, 1, '... world'))
+
+    print('hello ...')
+
+    # Wait until *fut* has a result (1 second) and print it.
+    print(await fut)
+
+asyncio.run(main())Transports and Protocols
+Preface
+
+Transports and Protocols are used by the low-level event loop APIs such as loop.create_connection(). They use callback-based programming style and enable high-performance implementations of network or IPC protocols (e.g. HTTP).
+
+Essentially, transports and protocols should only be used in libraries and frameworks and never in high-level asyncio applications.
+
+This documentation page covers both Transports and Protocols.
+
+Introduction
+
+At the highest level, the transport is concerned with how bytes are transmitted, while the protocol determines which bytes to transmit (and to some extent when).
+
+A different way of saying the same thing: a transport is an abstraction for a socket (or similar I/O endpoint) while a protocol is an abstraction for an application, from the transport’s point of view.
+
+Yet another view is the transport and protocol interfaces together define an abstract interface for using network I/O and interprocess I/O.
+
+There is always a 1:1 relationship between transport and protocol objects: the protocol calls transport methods to send data, while the transport calls protocol methods to pass it data that has been received.
+
+Most of connection oriented event loop methods (such as loop.create_connection()) usually accept a protocol_factory argument used to create a Protocol object for an accepted connection, represented by a Transport object. Such methods usually return a tuple of (transport, protocol).
+
+Contents
+
+This documentation page contains the following sections:
+
+The Transports section documents asyncio BaseTransport, ReadTransport, WriteTransport, Transport, DatagramTransport, and SubprocessTransport classes.
+
+The Protocols section documents asyncio BaseProtocol, Protocol, BufferedProtocol, DatagramProtocol, and SubprocessProtocol classes.
+
+The Examples section showcases how to work with transports, protocols, and low-level event loop APIs.
+
+Transports
+Source code: Lib/asyncio/transports.py
+
+Transports are classes provided by asyncio in order to abstract various kinds of communication channels.
+
+Transport objects are always instantiated by an asyncio event loop.
+
+asyncio implements transports for TCP, UDP, SSL, and subprocess pipes. The methods available on a transport depend on the transport’s kind.
+
+The transport classes are not thread safe.
+
+Transports Hierarchy
+class asyncio.BaseTransport
+Base class for all transports. Contains methods that all asyncio transports share.
+
+class asyncio.WriteTransport(BaseTransport)
+A base transport for write-only connections.
+
+Instances of the WriteTransport class are returned from the loop.connect_write_pipe() event loop method and are also used by subprocess-related methods like loop.subprocess_exec().
+
+class asyncio.ReadTransport(BaseTransport)
+A base transport for read-only connections.
+
+Instances of the ReadTransport class are returned from the loop.connect_read_pipe() event loop method and are also used by subprocess-related methods like loop.subprocess_exec().
+
+class asyncio.Transport(WriteTransport, ReadTransport)
+Interface representing a bidirectional transport, such as a TCP connection.
+
+The user does not instantiate a transport directly; they call a utility function, passing it a protocol factory and other information necessary to create the transport and protocol.
+
+Instances of the Transport class are returned from or used by event loop methods like loop.create_connection(), loop.create_unix_connection(), loop.create_server(), loop.sendfile(), etc.
+
+class asyncio.DatagramTransport(BaseTransport)
+A transport for datagram (UDP) connections.
+
+Instances of the DatagramTransport class are returned from the loop.create_datagram_endpoint() event loop method.
+
+class asyncio.SubprocessTransport(BaseTransport)
+An abstraction to represent a connection between a parent and its child OS process.
+
+Instances of the SubprocessTransport class are returned from event loop methods loop.subprocess_shell() and loop.subprocess_exec().
+
+Base Transport
+BaseTransport.close()
+Close the transport.
+
+If the transport has a buffer for outgoing data, buffered data will be flushed asynchronously. No more data will be received. After all buffered data is flushed, the protocol’s protocol.connection_lost() method will be called with None as its argument.
+
+BaseTransport.is_closing()
+Return True if the transport is closing or is closed.
+
+BaseTransport.get_extra_info(name, default=None)
+Return information about the transport or underlying resources it uses.
+
+name is a string representing the piece of transport-specific information to get.
+
+default is the value to return if the information is not available, or if the transport does not support querying it with the given third-party event loop implementation or on the current platform.
+
+For example, the following code attempts to get the underlying socket object of the transport:
+
+sock = transport.get_extra_info('socket')
+if sock is not None:
+    print(sock.getsockopt(...))
+Categories of information that can be queried on some transports:
+
+socket:
+
+'peername': the remote address to which the socket is connected, result of socket.socket.getpeername() (None on error)
+
+'socket': socket.socket instance
+
+'sockname': the socket’s own address, result of socket.socket.getsockname()
+
+SSL socket:
+
+'compression': the compression algorithm being used as a string, or None if the connection isn’t compressed; result of ssl.SSLSocket.compression()
+
+'cipher': a three-value tuple containing the name of the cipher being used, the version of the SSL protocol that defines its use, and the number of secret bits being used; result of ssl.SSLSocket.cipher()
+
+'peercert': peer certificate; result of ssl.SSLSocket.getpeercert()
+
+'sslcontext': ssl.SSLContext instance
+
+'ssl_object': ssl.SSLObject or ssl.SSLSocket instance
+
+pipe:
+
+'pipe': pipe object
+
+subprocess:
+
+'subprocess': subprocess.Popen instance
+
+BaseTransport.set_protocol(protocol)
+Set a new protocol.
+
+Switching protocol should only be done when both protocols are documented to support the switch.
+
+BaseTransport.get_protocol()
+Return the current protocol.
+
+Read-only Transports
+ReadTransport.is_reading()
+Return True if the transport is receiving new data.
+
+New in version 3.7.
+
+ReadTransport.pause_reading()
+Pause the receiving end of the transport. No data will be passed to the protocol’s protocol.data_received() method until resume_reading() is called.
+
+Changed in version 3.7: The method is idempotent, i.e. it can be called when the transport is already paused or closed.
+
+ReadTransport.resume_reading()
+Resume the receiving end. The protocol’s protocol.data_received() method will be called once again if some data is available for reading.
+
+Changed in version 3.7: The method is idempotent, i.e. it can be called when the transport is already reading.
+
+Write-only Transports
+WriteTransport.abort()
+Close the transport immediately, without waiting for pending operations to complete. Buffered data will be lost. No more data will be received. The protocol’s protocol.connection_lost() method will eventually be called with None as its argument.
+
+WriteTransport.can_write_eof()
+Return True if the transport supports write_eof(), False if not.
+
+WriteTransport.get_write_buffer_size()
+Return the current size of the output buffer used by the transport.
+
+WriteTransport.get_write_buffer_limits()
+Get the high and low watermarks for write flow control. Return a tuple (low, high) where low and high are positive number of bytes.
+
+Use set_write_buffer_limits() to set the limits.
+
+New in version 3.4.2.
+
+WriteTransport.set_write_buffer_limits(high=None, low=None)
+Set the high and low watermarks for write flow control.
+
+These two values (measured in number of bytes) control when the protocol’s protocol.pause_writing() and protocol.resume_writing() methods are called. If specified, the low watermark must be less than or equal to the high watermark. Neither high nor low can be negative.
+
+pause_writing() is called when the buffer size becomes greater than or equal to the high value. If writing has been paused, resume_writing() is called when the buffer size becomes less than or equal to the low value.
+
+The defaults are implementation-specific. If only the high watermark is given, the low watermark defaults to an implementation-specific value less than or equal to the high watermark. Setting high to zero forces low to zero as well, and causes pause_writing() to be called whenever the buffer becomes non-empty. Setting low to zero causes resume_writing() to be called only once the buffer is empty. Use of zero for either limit is generally sub-optimal as it reduces opportunities for doing I/O and computation concurrently.
+
+Use get_write_buffer_limits() to get the limits.
+
+WriteTransport.write(data)
+Write some data bytes to the transport.
+
+This method does not block; it buffers the data and arranges for it to be sent out asynchronously.
+
+WriteTransport.writelines(list_of_data)
+Write a list (or any iterable) of data bytes to the transport. This is functionally equivalent to calling write() on each element yielded by the iterable, but may be implemented more efficiently.
+
+WriteTransport.write_eof()
+Close the write end of the transport after flushing all buffered data. Data may still be received.
+
+This method can raise NotImplementedError if the transport (e.g. SSL) doesn’t support half-closed connections.
+
+Datagram Transports
+DatagramTransport.sendto(data, addr=None)
+Send the data bytes to the remote peer given by addr (a transport-dependent target address). If addr is None, the data is sent to the target address given on transport creation.
+
+This method does not block; it buffers the data and arranges for it to be sent out asynchronously.
+
+DatagramTransport.abort()
+Close the transport immediately, without waiting for pending operations to complete. Buffered data will be lost. No more data will be received. The protocol’s protocol.connection_lost() method will eventually be called with None as its argument.
+
+Subprocess Transports
+SubprocessTransport.get_pid()
+Return the subprocess process id as an integer.
+
+SubprocessTransport.get_pipe_transport(fd)
+Return the transport for the communication pipe corresponding to the integer file descriptor fd:
+
+0: readable streaming transport of the standard input (stdin), or None if the subprocess was not created with stdin=PIPE
+
+1: writable streaming transport of the standard output (stdout), or None if the subprocess was not created with stdout=PIPE
+
+2: writable streaming transport of the standard error (stderr), or None if the subprocess was not created with stderr=PIPE
+
+other fd: None
+
+SubprocessTransport.get_returncode()
+Return the subprocess return code as an integer or None if it hasn’t returned, which is similar to the subprocess.Popen.returncode attribute.
+
+SubprocessTransport.kill()
+Kill the subprocess.
+
+On POSIX systems, the function sends SIGKILL to the subprocess. On Windows, this method is an alias for terminate().
+
+See also subprocess.Popen.kill().
+
+SubprocessTransport.send_signal(signal)
+Send the signal number to the subprocess, as in subprocess.Popen.send_signal().
+
+SubprocessTransport.terminate()
+Stop the subprocess.
+
+On POSIX systems, this method sends SIGTERM to the subprocess. On Windows, the Windows API function TerminateProcess() is called to stop the subprocess.
+
+See also subprocess.Popen.terminate().
+
+SubprocessTransport.close()
+Kill the subprocess by calling the kill() method.
+
+If the subprocess hasn’t returned yet, and close transports of stdin, stdout, and stderr pipes.
+
+Protocols
+Source code: Lib/asyncio/protocols.py
+
+asyncio provides a set of abstract base classes that should be used to implement network protocols. Those classes are meant to be used together with transports.
+
+Subclasses of abstract base protocol classes may implement some or all methods. All these methods are callbacks: they are called by transports on certain events, for example when some data is received. A base protocol method should be called by the corresponding transport.
+
+Base Protocols
+class asyncio.BaseProtocol
+Base protocol with methods that all protocols share.
+
+class asyncio.Protocol(BaseProtocol)
+The base class for implementing streaming protocols (TCP, Unix sockets, etc).
+
+class asyncio.BufferedProtocol(BaseProtocol)
+A base class for implementing streaming protocols with manual control of the receive buffer.
+
+class asyncio.DatagramProtocol(BaseProtocol)
+The base class for implementing datagram (UDP) protocols.
+
+class asyncio.SubprocessProtocol(BaseProtocol)
+The base class for implementing protocols communicating with child processes (unidirectional pipes).
+
+Base Protocol
+All asyncio protocols can implement Base Protocol callbacks.
+
+Connection Callbacks
+
+Connection callbacks are called on all protocols, exactly once per a successful connection. All other protocol callbacks can only be called between those two methods.
+
+BaseProtocol.connection_made(transport)
+Called when a connection is made.
+
+The transport argument is the transport representing the connection. The protocol is responsible for storing the reference to its transport.
+
+BaseProtocol.connection_lost(exc)
+Called when the connection is lost or closed.
+
+The argument is either an exception object or None. The latter means a regular EOF is received, or the connection was aborted or closed by this side of the connection.
+
+Flow Control Callbacks
+
+Flow control callbacks can be called by transports to pause or resume writing performed by the protocol.
+
+See the documentation of the set_write_buffer_limits() method for more details.
+
+BaseProtocol.pause_writing()
+Called when the transport’s buffer goes over the high watermark.
+
+BaseProtocol.resume_writing()
+Called when the transport’s buffer drains below the low watermark.
+
+If the buffer size equals the high watermark, pause_writing() is not called: the buffer size must go strictly over.
+
+Conversely, resume_writing() is called when the buffer size is equal or lower than the low watermark. These end conditions are important to ensure that things go as expected when either mark is zero.
+
+Streaming Protocols
+Event methods, such as loop.create_server(), loop.create_unix_server(), loop.create_connection(), loop.create_unix_connection(), loop.connect_accepted_socket(), loop.connect_read_pipe(), and loop.connect_write_pipe() accept factories that return streaming protocols.
+
+Protocol.data_received(data)
+Called when some data is received. data is a non-empty bytes object containing the incoming data.
+
+Whether the data is buffered, chunked or reassembled depends on the transport. In general, you shouldn’t rely on specific semantics and instead make your parsing generic and flexible. However, data is always received in the correct order.
+
+The method can be called an arbitrary number of times while a connection is open.
+
+However, protocol.eof_received() is called at most once. Once eof_received() is called, data_received() is not called anymore.
+
+Protocol.eof_received()
+Called when the other end signals it won’t send any more data (for example by calling transport.write_eof(), if the other end also uses asyncio).
+
+This method may return a false value (including None), in which case the transport will close itself. Conversely, if this method returns a true value, the protocol used determines whether to close the transport. Since the default implementation returns None, it implicitly closes the connection.
+
+Some transports, including SSL, don’t support half-closed connections, in which case returning true from this method will result in the connection being closed.
+
+State machine:
+
+start -> connection_made
+    [-> data_received]*
+    [-> eof_received]?
+-> connection_lost -> end
+Buffered Streaming Protocols
+New in version 3.7.
+
+Buffered Protocols can be used with any event loop method that supports Streaming Protocols.
+
+BufferedProtocol implementations allow explicit manual allocation and control of the receive buffer. Event loops can then use the buffer provided by the protocol to avoid unnecessary data copies. This can result in noticeable performance improvement for protocols that receive big amounts of data. Sophisticated protocol implementations can significantly reduce the number of buffer allocations.
+
+The following callbacks are called on BufferedProtocol instances:
+
+BufferedProtocol.get_buffer(sizehint)
+Called to allocate a new receive buffer.
+
+sizehint is the recommended minimum size for the returned buffer. It is acceptable to return smaller or larger buffers than what sizehint suggests. When set to -1, the buffer size can be arbitrary. It is an error to return a buffer with a zero size.
+
+get_buffer() must return an object implementing the buffer protocol.
+
+BufferedProtocol.buffer_updated(nbytes)
+Called when the buffer was updated with the received data.
+
+nbytes is the total number of bytes that were written to the buffer.
+
+BufferedProtocol.eof_received()
+See the documentation of the protocol.eof_received() method.
+
+get_buffer() can be called an arbitrary number of times during a connection. However, protocol.eof_received() is called at most once and, if called, get_buffer() and buffer_updated() won’t be called after it.
+
+State machine:
+
+start -> connection_made
+    [-> get_buffer
+        [-> buffer_updated]?
+    ]*
+    [-> eof_received]?
+-> connection_lost -> end
+Datagram Protocols
+Datagram Protocol instances should be constructed by protocol factories passed to the loop.create_datagram_endpoint() method.
+
+DatagramProtocol.datagram_received(data, addr)
+Called when a datagram is received. data is a bytes object containing the incoming data. addr is the address of the peer sending the data; the exact format depends on the transport.
+
+DatagramProtocol.error_received(exc)
+Called when a previous send or receive operation raises an OSError. exc is the OSError instance.
+
+This method is called in rare conditions, when the transport (e.g. UDP) detects that a datagram could not be delivered to its recipient. In many conditions though, undeliverable datagrams will be silently dropped.
+
+Note On BSD systems (macOS, FreeBSD, etc.) flow control is not supported for datagram protocols, because there is no reliable way to detect send failures caused by writing too many packets.
+The socket always appears ‘ready’ and excess packets are dropped. An OSError with errno set to errno.ENOBUFS may or may not be raised; if it is raised, it will be reported to DatagramProtocol.error_received() but otherwise ignored.
+
+Subprocess Protocols
+Subprocess Protocol instances should be constructed by protocol factories passed to the loop.subprocess_exec() and loop.subprocess_shell() methods.
+
+SubprocessProtocol.pipe_data_received(fd, data)
+Called when the child process writes data into its stdout or stderr pipe.
+
+fd is the integer file descriptor of the pipe.
+
+data is a non-empty bytes object containing the received data.
+
+SubprocessProtocol.pipe_connection_lost(fd, exc)
+Called when one of the pipes communicating with the child process is closed.
+
+fd is the integer file descriptor that was closed.
+
+SubprocessProtocol.process_exited()
+Called when the child process has exited.
+
+Examples
+TCP Echo Server
+Create a TCP echo server using the loop.create_server() method, send back received data, and close the connection:
+
+import asyncio
+
+
+class EchoServerProtocol(asyncio.Protocol):
+    def connection_made(self, transport):
+        peername = transport.get_extra_info('peername')
+        print('Connection from {}'.format(peername))
+        self.transport = transport
+
+    def data_received(self, data):
+        message = data.decode()
+        print('Data received: {!r}'.format(message))
+
+        print('Send: {!r}'.format(message))
+        self.transport.write(data)
+
+        print('Close the client socket')
+        self.transport.close()
+
+
+async def main():
+    # Get a reference to the event loop as we plan to use
+    # low-level APIs.
+    loop = asyncio.get_running_loop()
+
+    server = await loop.create_server(
+        lambda: EchoServerProtocol(),
+        '127.0.0.1', 8888)
+
+    async with server:
+        await server.serve_forever()
+
+
+asyncio.run(main())
+See also The TCP echo server using streams example uses the high-level asyncio.start_server() function.
+TCP Echo Client
+A TCP echo client using the loop.create_connection() method, sends data, and waits until the connection is closed:
+
+import asyncio
+
+
+class EchoClientProtocol(asyncio.Protocol):
+    def __init__(self, message, on_con_lost):
+        self.message = message
+        self.on_con_lost = on_con_lost
+
+    def connection_made(self, transport):
+        transport.write(self.message.encode())
+        print('Data sent: {!r}'.format(self.message))
+
+    def data_received(self, data):
+        print('Data received: {!r}'.format(data.decode()))
+
+    def connection_lost(self, exc):
+        print('The server closed the connection')
+        self.on_con_lost.set_result(True)
+
+
+async def main():
+    # Get a reference to the event loop as we plan to use
+    # low-level APIs.
+    loop = asyncio.get_running_loop()
+
+    on_con_lost = loop.create_future()
+    message = 'Hello World!'
+
+    transport, protocol = await loop.create_connection(
+        lambda: EchoClientProtocol(message, on_con_lost),
+        '127.0.0.1', 8888)
+
+    # Wait until the protocol signals that the connection
+    # is lost and close the transport.
+    try:
+        await on_con_lost
+    finally:
+        transport.close()
+
+
+asyncio.run(main())
+See also The TCP echo client using streams example uses the high-level asyncio.open_connection() function.
+UDP Echo Server
+A UDP echo server, using the loop.create_datagram_endpoint() method, sends back received data:
+
+import asyncio
+
+
+class EchoServerProtocol:
+    def connection_made(self, transport):
+        self.transport = transport
+
+    def datagram_received(self, data, addr):
+        message = data.decode()
+        print('Received %r from %s' % (message, addr))
+        print('Send %r to %s' % (message, addr))
+        self.transport.sendto(data, addr)
+
+
+async def main():
+    print("Starting UDP server")
+
+    # Get a reference to the event loop as we plan to use
+    # low-level APIs.
+    loop = asyncio.get_running_loop()
+
+    # One protocol instance will be created to serve all
+    # client requests.
+    transport, protocol = await loop.create_datagram_endpoint(
+        lambda: EchoServerProtocol(),
+        local_addr=('127.0.0.1', 9999))
+
+    try:
+        await asyncio.sleep(3600)  # Serve for 1 hour.
+    finally:
+        transport.close()
+
+
+asyncio.run(main())
+UDP Echo Client
+A UDP echo client, using the loop.create_datagram_endpoint() method, sends data and closes the transport when it receives the answer:
+
+import asyncio
+
+
+class EchoClientProtocol:
+    def __init__(self, message, on_con_lost):
+        self.message = message
+        self.on_con_lost = on_con_lost
+        self.transport = None
+
+    def connection_made(self, transport):
+        self.transport = transport
+        print('Send:', self.message)
+        self.transport.sendto(self.message.encode())
+
+    def datagram_received(self, data, addr):
+        print("Received:", data.decode())
+
+        print("Close the socket")
+        self.transport.close()
+
+    def error_received(self, exc):
+        print('Error received:', exc)
+
+    def connection_lost(self, exc):
+        print("Connection closed")
+        self.on_con_lost.set_result(True)
+
+
+async def main():
+    # Get a reference to the event loop as we plan to use
+    # low-level APIs.
+    loop = asyncio.get_running_loop()
+
+    on_con_lost = loop.create_future()
+    message = "Hello World!"
+
+    transport, protocol = await loop.create_datagram_endpoint(
+        lambda: EchoClientProtocol(message, on_con_lost),
+        remote_addr=('127.0.0.1', 9999))
+
+    try:
+        await on_con_lost
+    finally:
+        transport.close()
+
+
+asyncio.run(main())
+Connecting Existing Sockets
+Wait until a socket receives data using the loop.create_connection() method with a protocol:
+
+import asyncio
+import socket
+
+
+class MyProtocol(asyncio.Protocol):
+
+    def __init__(self, on_con_lost):
+        self.transport = None
+        self.on_con_lost = on_con_lost
+
+    def connection_made(self, transport):
+        self.transport = transport
+
+    def data_received(self, data):
+        print("Received:", data.decode())
+
+        # We are done: close the transport;
+        # connection_lost() will be called automatically.
+        self.transport.close()
+
+    def connection_lost(self, exc):
+        # The socket has been closed
+        self.on_con_lost.set_result(True)
+
+
+async def main():
+    # Get a reference to the event loop as we plan to use
+    # low-level APIs.
+    loop = asyncio.get_running_loop()
+    on_con_lost = loop.create_future()
+
+    # Create a pair of connected sockets
+    rsock, wsock = socket.socketpair()
+
+    # Register the socket to wait for data.
+    transport, protocol = await loop.create_connection(
+        lambda: MyProtocol(on_con_lost), sock=rsock)
+
+    # Simulate the reception of data from the network.
+    loop.call_soon(wsock.send, 'abc'.encode())
+
+    try:
+        await protocol.on_con_lost
+    finally:
+        transport.close()
+        wsock.close()
+
+asyncio.run(main())
+See also The watch a file descriptor for read events example uses the low-level loop.add_reader() method to register an FD.
+The register an open socket to wait for data using streams example uses high-level streams created by the open_connection() function in a coroutine.
+
+loop.subprocess_exec() and SubprocessProtocol
+An example of a subprocess protocol used to get the output of a subprocess and to wait for the subprocess exit.
+
+The subprocess is created by the loop.subprocess_exec() method:
+
+import asyncio
+import sys
+
+class DateProtocol(asyncio.SubprocessProtocol):
+    def __init__(self, exit_future):
+        self.exit_future = exit_future
+        self.output = bytearray()
+
+    def pipe_data_received(self, fd, data):
+        self.output.extend(data)
+
+    def process_exited(self):
+        self.exit_future.set_result(True)
+
+async def get_date():
+    # Get a reference to the event loop as we plan to use
+    # low-level APIs.
+    loop = asyncio.get_running_loop()
+
+    code = 'import datetime; print(datetime.datetime.now())'
+    exit_future = asyncio.Future(loop=loop)
+
+    # Create the subprocess controlled by DateProtocol;
+    # redirect the standard output into a pipe.
+    transport, protocol = await loop.subprocess_exec(
+        lambda: DateProtocol(exit_future),
+        sys.executable, '-c', code,
+        stdin=None, stderr=None)
+
+    # Wait for the subprocess exit using the process_exited()
+    # method of the protocol.
+    await exit_future
+
+    # Close the stdout pipe.
+    transport.close()
+
+    # Read the output which was collected by the
+    # pipe_data_received() method of the protocol.
+    data = bytes(protocol.output)
+    return data.decode('ascii').rstrip()
+
+date = asyncio.run(get_date())
+print(f"Current date: {date}")
+Policies
+An event loop policy is a global object used to get and set the current event loop, as well as create new event loops. The default policy can be replaced with built-in alternatives to use different event loop implementations, or substituted by a custom policy that can override these behaviors.
+
+The policy object gets and sets a separate event loop per context. This is per-thread by default, though custom policies could define context differently.
+
+Custom event loop policies can control the behavior of get_event_loop(), set_event_loop(), and new_event_loop().
+
+Policy objects should implement the APIs defined in the AbstractEventLoopPolicy abstract base class.
+
+Getting and Setting the Policy
+The following functions can be used to get and set the policy for the current process:
+
+asyncio.get_event_loop_policy()
+Return the current process-wide policy.
+
+asyncio.set_event_loop_policy(policy)
+Set the current process-wide policy to policy.
+
+If policy is set to None, the default policy is restored.
+
+Policy Objects
+The abstract event loop policy base class is defined as follows:
+
+class asyncio.AbstractEventLoopPolicy
+An abstract base class for asyncio policies.
+
+get_event_loop()
+Get the event loop for the current context.
+
+Return an event loop object implementing the AbstractEventLoop interface.
+
+This method should never return None.
+
+Changed in version 3.6.
+
+set_event_loop(loop)
+Set the event loop for the current context to loop.
+
+new_event_loop()
+Create and return a new event loop object.
+
+This method should never return None.
+
+get_child_watcher()
+Get a child process watcher object.
+
+Return a watcher object implementing the AbstractChildWatcher interface.
+
+This function is Unix specific.
+
+set_child_watcher(watcher)
+Set the current child process watcher to watcher.
+
+This function is Unix specific.
+
+asyncio ships with the following built-in policies:
+
+class asyncio.DefaultEventLoopPolicy
+The default asyncio policy. Uses SelectorEventLoop on Unix and ProactorEventLoop on Windows.
+
+There is no need to install the default policy manually. asyncio is configured to use the default policy automatically.
+
+Changed in version 3.8: On Windows, ProactorEventLoop is now used by default.
+
+class asyncio.WindowsSelectorEventLoopPolicy
+An alternative event loop policy that uses the SelectorEventLoop event loop implementation.
+
+Availability: Windows.
+
+class asyncio.WindowsProactorEventLoopPolicy
+An alternative event loop policy that uses the ProactorEventLoop event loop implementation.
+
+Availability: Windows.
+
+Process Watchers
+A process watcher allows customization of how an event loop monitors child processes on Unix. Specifically, the event loop needs to know when a child process has exited.
+
+In asyncio, child processes are created with create_subprocess_exec() and loop.subprocess_exec() functions.
+
+asyncio defines the AbstractChildWatcher abstract base class, which child watchers should implement, and has four different implementations: ThreadedChildWatcher (configured to be used by default), MultiLoopChildWatcher, SafeChildWatcher, and FastChildWatcher.
+
+See also the Subprocess and Threads section.
+
+The following two functions can be used to customize the child process watcher implementation used by the asyncio event loop:
+
+asyncio.get_child_watcher()
+Return the current child watcher for the current policy.
+
+asyncio.set_child_watcher(watcher)
+Set the current child watcher to watcher for the current policy. watcher must implement methods defined in the AbstractChildWatcher base class.
+
+Note Third-party event loops implementations might not support custom child watchers. For such event loops, using set_child_watcher() might be prohibited or have no effect.
+class asyncio.AbstractChildWatcher
+add_child_handler(pid, callback, *args)
+Register a new child handler.
+
+Arrange for callback(pid, returncode, *args) to be called when a process with PID equal to pid terminates. Specifying another callback for the same process replaces the previous handler.
+
+The callback callable must be thread-safe.
+
+remove_child_handler(pid)
+Removes the handler for process with PID equal to pid.
+
+The function returns True if the handler was successfully removed, False if there was nothing to remove.
+
+attach_loop(loop)
+Attach the watcher to an event loop.
+
+If the watcher was previously attached to an event loop, then it is first detached before attaching to the new loop.
+
+Note: loop may be None.
+
+is_active()
+Return True if the watcher is ready to use.
+
+Spawning a subprocess with inactive current child watcher raises RuntimeError.
+
+New in version 3.8.
+
+close()
+Close the watcher.
+
+This method has to be called to ensure that underlying resources are cleaned-up.
+
+class asyncio.ThreadedChildWatcher
+This implementation starts a new waiting thread for every subprocess spawn.
+
+It works reliably even when the asyncio event loop is run in a non-main OS thread.
+
+There is no noticeable overhead when handling a big number of children (O(1) each time a child terminates), but starting a thread per process requires extra memory.
+
+This watcher is used by default.
+
+New in version 3.8.
+
+class asyncio.MultiLoopChildWatcher
+This implementation registers a SIGCHLD signal handler on instantiation. That can break third-party code that installs a custom handler for SIGCHLD signal.
+
+The watcher avoids disrupting other code spawning processes by polling every process explicitly on a SIGCHLD signal.
+
+There is no limitation for running subprocesses from different threads once the watcher is installed.
+
+The solution is safe but it has a significant overhead when handling a big number of processes (O(n) each time a SIGCHLD is received).
+
+New in version 3.8.
+
+class asyncio.SafeChildWatcher
+This implementation uses active event loop from the main thread to handle SIGCHLD signal. If the main thread has no running event loop another thread cannot spawn a subprocess (RuntimeError is raised).
+
+The watcher avoids disrupting other code spawning processes by polling every process explicitly on a SIGCHLD signal.
+
+This solution is as safe as MultiLoopChildWatcher and has the same O(N) complexity but requires a running event loop in the main thread to work.
+
+class asyncio.FastChildWatcher
+This implementation reaps every terminated processes by calling os.waitpid(-1) directly, possibly breaking other code spawning processes and waiting for their termination.
+
+There is no noticeable overhead when handling a big number of children (O(1) each time a child terminates).
+
+This solution requires a running event loop in the main thread to work, as SafeChildWatcher.
+
+class asyncio.PidfdChildWatcher
+This implementation polls process file descriptors (pidfds) to await child process termination. In some respects, PidfdChildWatcher is a “Goldilocks” child watcher implementation. It doesn’t require signals or threads, doesn’t interfere with any processes launched outside the event loop, and scales linearly with the number of subprocesses launched by the event loop. The main disadvantage is that pidfds are specific to Linux, and only work on recent (5.3+) kernels.
+
+New in version 3.9.
+
+Custom Policies
+To implement a new event loop policy, it is recommended to subclass DefaultEventLoopPolicy and override the methods for which custom behavior is wanted, e.g.:
+
+class MyEventLoopPolicy(asyncio.DefaultEventLoopPolicy):
+
+    def get_event_loop(self):
+        """Get the event loop.
+
+        This may be None or an instance of EventLoop.
+        """
+        loop = super().get_event_loop()
+        # Do something with loop ...
+        return loop
+
+asyncio.set_event_loop_policy(MyEventLoopPolicy())Platform Support
+The asyncio module is designed to be portable, but some platforms have subtle differences and limitations due to the platforms’ underlying architecture and capabilities.
+
+All Platforms
+loop.add_reader() and loop.add_writer() cannot be used to monitor file I/O.
+
+Windows
+Source code: Lib/asyncio/proactor_events.py, Lib/asyncio/windows_events.py, Lib/asyncio/windows_utils.py
+
+Changed in version 3.8: On Windows, ProactorEventLoop is now the default event loop.
+
+All event loops on Windows do not support the following methods:
+
+loop.create_unix_connection() and loop.create_unix_server() are not supported. The socket.AF_UNIX socket family is specific to Unix.
+
+loop.add_signal_handler() and loop.remove_signal_handler() are not supported.
+
+SelectorEventLoop has the following limitations:
+
+SelectSelector is used to wait on socket events: it supports sockets and is limited to 512 sockets.
+
+loop.add_reader() and loop.add_writer() only accept socket handles (e.g. pipe file descriptors are not supported).
+
+Pipes are not supported, so the loop.connect_read_pipe() and loop.connect_write_pipe() methods are not implemented.
+
+Subprocesses are not supported, i.e. loop.subprocess_exec() and loop.subprocess_shell() methods are not implemented.
+
+ProactorEventLoop has the following limitations:
+
+The loop.add_reader() and loop.add_writer() methods are not supported.
+
+The resolution of the monotonic clock on Windows is usually around 15.6 msec. The best resolution is 0.5 msec. The resolution depends on the hardware (availability of HPET) and on the Windows configuration.
+
+Subprocess Support on Windows
+On Windows, the default event loop ProactorEventLoop supports subprocesses, whereas SelectorEventLoop does not.
+
+The policy.set_child_watcher() function is also not supported, as ProactorEventLoop has a different mechanism to watch child processes.
+
+macOS
+Modern macOS versions are fully supported.
+
+macOS <= 10.8
+
+On macOS 10.6, 10.7 and 10.8, the default event loop uses selectors.KqueueSelector, which does not support character devices on these versions. The SelectorEventLoop can be manually configured to use SelectSelector or PollSelector to support character devices on these older versions of macOS. Example:
+
+import asyncio
+import selectors
+
+selector = selectors.SelectSelector()
+loop = asyncio.SelectorEventLoop(selector)
+asyncio.set_event_loop(loop)
